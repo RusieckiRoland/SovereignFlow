@@ -1,49 +1,149 @@
-from pathlib import Path
+from __future__ import annotations
 
-from sovereignflow.api import create_app
-from sovereignflow.domain import DomainProfile
-from sovereignflow.models import DocumentChunk
-from sovereignflow.providers.in_memory import InMemoryDocumentStore
-from sovereignflow.rag import RAGService
+from dataclasses import dataclass
 
+import pytest
+from conftest import StubModel, StubPrompts, StubRetrieval
 
-class FakeModel:
-    def generate(self, **kwargs) -> str:
-        return "Mobile-ready response."
+from sovereignflow.application import RagQueryService
+from sovereignflow.domain import DependencyUnavailableError
+from sovereignflow.interfaces import QueryDispatcher, create_app
 
 
-def test_query_endpoint_exposes_generic_rag_contract() -> None:
-    pipeline_path = Path(__file__).parents[1] / "pipelines" / "default.yaml"
-    domain = DomainProfile.from_mapping(
-        {
-            "name": "general",
-            "collection": "General",
-            "pipeline": str(pipeline_path),
-            "system_prompt": "Use evidence.",
-        }
+@dataclass
+class Probe:
+    name: str
+    healthy: bool = True
+
+    def check(self) -> None:
+        if not self.healthy:
+            raise DependencyUnavailableError("down")
+
+
+def application(domain_profile, search_hit):
+    service = RagQueryService(
+        domain=domain_profile,
+        retrieval=StubRetrieval((search_hit,)),
+        model=StubModel(answer="API answer."),
+        prompts=StubPrompts(),
     )
-    store = InMemoryDocumentStore(
-        [
-            DocumentChunk(
-                chunk_id="chunk-1",
-                domain="general",
-                source_id="source-1",
-                text="SovereignFlow can serve mobile applications through an HTTP API.",
-            )
-        ]
-    )
-    app = create_app({"general": RAGService(domain, store, FakeModel())})
+    dispatcher = QueryDispatcher({"general": service})
+    return create_app(dispatcher, (Probe("postgresql"), Probe("weaviate")))
 
-    response = app.test_client().post(
+
+def test_liveness_readiness_and_query_contract(domain_profile, search_hit) -> None:
+    app = application(domain_profile, search_hit)
+    client = app.test_client()
+    dispatcher = QueryDispatcher({})
+
+    assert client.get("/live").get_json() == {"ok": True}
+    assert dispatcher.domains == ()
+    assert client.get("/ready").get_json() == {
+        "ok": True,
+        "components": {"postgresql": "ready", "weaviate": "ready"},
+    }
+    response = client.post(
         "/v1/query",
+        headers={"X-Request-ID": "request-1"},
         json={
-            "query": "mobile HTTP API",
+            "query": "question",
             "domain": "general",
-            "session_id": "mobile-session",
+            "session_id": "session-1",
+            "filters": {"country": "PL"},
         },
     )
 
     assert response.status_code == 200
-    payload = response.get_json()
-    assert payload["answer"] == "Mobile-ready response."
-    assert payload["citations"][0]["source_id"] == "source-1"
+    body = response.get_json()
+    assert body["request_id"] == "request-1"
+    assert body["answer"].startswith("API answer.")
+    assert body["citations"][0]["score_type"] == "hybrid"
+
+
+def test_readiness_reports_each_unavailable_component() -> None:
+    app = create_app(QueryDispatcher({}), (Probe("ok"), Probe("down", False)))
+
+    response = app.test_client().get("/ready")
+
+    assert response.status_code == 503
+    assert response.get_json() == {
+        "ok": False,
+        "components": {"ok": "ready", "down": "unavailable"},
+    }
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "code", "status"),
+    [
+        ({"data": "not-json", "content_type": "text/plain"}, "validation_error", 400),
+        ({"json": []}, "validation_error", 400),
+        (
+            {
+                "json": {
+                    "query": "q",
+                    "domain": "general",
+                    "session_id": "s",
+                    "filters": [],
+                }
+            },
+            "validation_error",
+            400,
+        ),
+        (
+            {"json": {"query": "q", "domain": "missing", "session_id": "s"}},
+            "domain_not_found",
+            404,
+        ),
+    ],
+)
+def test_api_returns_stable_known_errors(kwargs, code: str, status: int) -> None:
+    app = create_app(QueryDispatcher({}), ())
+
+    response = app.test_client().post(
+        "/v1/query",
+        headers={"X-Request-ID": "known-request"},
+        **kwargs,
+    )
+
+    assert response.status_code == status
+    assert response.get_json()["error"] == {
+        "code": code,
+        "message": response.get_json()["error"]["message"],
+        "request_id": "known-request",
+    }
+
+
+class BrokenDispatcher:
+    domains = ()
+
+    def execute(self, command):
+        raise RuntimeError("secret internal detail")
+
+
+def test_api_hides_unexpected_error_details() -> None:
+    app = create_app(BrokenDispatcher(), ())  # type: ignore[arg-type]
+
+    response = app.test_client().post(
+        "/v1/query",
+        headers={"X-Request-ID": "unexpected-request"},
+        json={"query": "q", "domain": "d", "session_id": "s"},
+    )
+
+    assert response.status_code == 500
+    assert response.get_json()["error"] == {
+        "code": "internal_error",
+        "message": "The request could not be completed.",
+        "request_id": "unexpected-request",
+    }
+    assert "secret" not in response.get_data(as_text=True)
+
+
+def test_request_id_is_generated_when_header_is_missing() -> None:
+    app = create_app(QueryDispatcher({}), ())
+
+    response = app.test_client().post(
+        "/v1/query",
+        json={"query": "q", "domain": "missing", "session_id": "s"},
+    )
+
+    assert response.get_json()["error"]["request_id"]

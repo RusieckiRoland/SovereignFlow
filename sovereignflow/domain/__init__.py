@@ -1,21 +1,22 @@
-from .application import RagQueryService
-from .domain import (
-    Citation,
+from .errors import (
     ConfigurationError,
     DependencyUnavailableError,
-    DocumentChunk,
     DomainNotFoundError,
-    DomainProfile,
     PolicyViolationError,
     ProviderProtocolError,
+    SovereignFlowError,
+    ValidationError,
+)
+from .models import (
+    Citation,
+    DocumentChunk,
+    DomainProfile,
     QueryCommand,
     QueryResult,
     RetrievalProfile,
     SearchHit,
     SearchMode,
     SearchRequest,
-    SovereignFlowError,
-    ValidationError,
 )
 
 __all__ = [
@@ -29,7 +30,6 @@ __all__ = [
     "ProviderProtocolError",
     "QueryCommand",
     "QueryResult",
-    "RagQueryService",
     "RetrievalProfile",
     "SearchHit",
     "SearchMode",
@@ -37,5 +37,3 @@ __all__ = [
     "SovereignFlowError",
     "ValidationError",
 ]
-
-__version__ = "0.2.0"

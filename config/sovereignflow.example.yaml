@@ -1,21 +1,39 @@
 server:
   host: 127.0.0.1
   port: 8000
+  threads: 8
 
-model_policy: local_only
+postgresql:
+  connection_url_env: POSTGRES_URL
+  timeout_seconds: 5
 
+selected_model: local-default
 models:
   - name: local-default
     scope: local
     base_url: http://127.0.0.1:8080/v1
-    model: local-model
+    model: your-local-model
+    timeout_seconds: 120
+  # - name: openai
+  #   scope: external
+  #   base_url: https://api.openai.com/v1
+  #   model: your-openai-model
+  #   api_key_env: OPENAI_API_KEY
+  #   timeout_seconds: 120
 
-retrieval:
-  provider: weaviate
+embeddings:
+  name: local-embeddings
+  base_url: http://127.0.0.1:8082/v1
+  model: your-embedding-model
+  timeout_seconds: 30
+
+weaviate:
   host: 127.0.0.1
   http_port: 18080
   grpc_port: 15005
+  secure: false
+  api_key_env: WEAVIATE_API_KEY
 
+prompts_root: ../prompts/general
 domains:
-  - config/domains/general.yaml
-
+  - domains/general.yaml

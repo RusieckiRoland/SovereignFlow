@@ -4,10 +4,9 @@
 
 SovereignFlow owns reusable RAG mechanics:
 
-- pipeline execution,
-- retrieval and model ports,
-- local/external model routing policy,
-- generic chunk ingestion,
+- vertical query orchestration,
+- retrieval, embedding and model ports,
+- explicit local/external model selection,
 - evidence assembly,
 - citations,
 - security metadata,
@@ -35,18 +34,20 @@ Intentionally removed:
 - UML and Enterprise Architect commands,
 - code-oriented prompts and model defaults.
 
-## Dependency direction
+## Clean Architecture dependency direction
 
 ```text
-TaricAI importer/API ──> SovereignFlow contracts
-Other domain app     ──> SovereignFlow contracts
+interfaces -> application -> domain
+infrastructure -> application ports
+bootstrap -> all layers
 
-SovereignFlow ──> PostgreSQL / Weaviate / local or external model adapters
+TaricAI and other domains -> public SovereignFlow contracts
 ```
 
-A domain project may register new actions and metadata, but it must not require changes to the generic state model.
+The domain layer imports no infrastructure framework or SDK. The application layer depends only on domain types and application ports.
 
 ## Security rule
 
-External transmission is denied by configuration, not by convention. A model endpoint declares its scope, and the router enforces the selected policy before a prompt is sent.
+External transmission is denied by configuration, not by convention. Configuration selects exactly one model endpoint before startup. If that endpoint fails, the request fails; SovereignFlow does not try another provider.
 
+Weaviate anonymous access is disabled. Tenant, ACL, and classification boundaries are applied in retrieval and verified again before evidence is sent to the model.

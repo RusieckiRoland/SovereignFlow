@@ -1,14 +1,13 @@
 name: general
 description: General-purpose knowledge assistant
 collection: SovereignFlowGeneral
-pipeline: pipelines/default.yaml
-allow_external_models: false
-system_prompt: |
-  You are an evidence-grounded assistant.
-  Answer only from the supplied evidence.
-  Clearly state when the evidence is insufficient.
+tenant_id: default
+prompt_name: answer
+allow_external_model: false
 disclaimer: |
   This response is generated from retrieved source material and should be verified by the user.
+allowed_acl_labels: []
+max_classification_level: 0
 retrieval:
   mode: hybrid
   top_k: 8

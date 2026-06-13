@@ -6,7 +6,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-sovereignflow}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
     ports:
-      - "127.0.0.1:15432:5432"
+      - "127.0.0.1:${SOVEREIGNFLOW_POSTGRES_PORT:-15432}:5432"
     volumes:
       - sovereignflow_postgres:/var/lib/postgresql/data
     healthcheck:
@@ -20,17 +20,21 @@ services:
     command: ["--host", "0.0.0.0", "--port", "8080", "--scheme", "http"]
     environment:
       QUERY_DEFAULTS_LIMIT: "25"
-      AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: "true"
+      AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: "false"
+      AUTHENTICATION_APIKEY_ENABLED: "true"
+      AUTHENTICATION_APIKEY_ALLOWED_KEYS: ${WEAVIATE_API_KEY:?WEAVIATE_API_KEY is required}
+      AUTHENTICATION_APIKEY_USERS: sovereignflow
+      AUTHORIZATION_ADMINLIST_ENABLED: "true"
+      AUTHORIZATION_ADMINLIST_USERS: sovereignflow
       PERSISTENCE_DATA_PATH: "/var/lib/weaviate"
       DEFAULT_VECTORIZER_MODULE: "none"
       CLUSTER_HOSTNAME: "sovereignflow-node"
     ports:
-      - "127.0.0.1:18080:8080"
-      - "127.0.0.1:15005:50051"
+      - "127.0.0.1:${SOVEREIGNFLOW_WEAVIATE_HTTP_PORT:-18080}:8080"
+      - "127.0.0.1:${SOVEREIGNFLOW_WEAVIATE_GRPC_PORT:-15005}:50051"
     volumes:
       - sovereignflow_weaviate:/var/lib/weaviate
 
 volumes:
   sovereignflow_postgres:
   sovereignflow_weaviate:
-
