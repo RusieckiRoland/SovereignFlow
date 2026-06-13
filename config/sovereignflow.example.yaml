@@ -35,5 +35,6 @@ weaviate:
   api_key_env: WEAVIATE_API_KEY
 
 prompts_root: ../prompts/general
+pipelines_root: ../pipelines
 domains:
   - domains/general.yaml

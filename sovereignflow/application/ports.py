@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Protocol
 
-from sovereignflow.domain import SearchHit, SearchRequest
+from sovereignflow.domain import PipelineRun, PipelineStepAudit, SearchHit, SearchRequest
 
 
 class RetrievalPort(Protocol):
@@ -36,3 +36,13 @@ class HealthProbe(Protocol):
     def name(self) -> str: ...
 
     def check(self) -> None: ...
+
+
+class ExecutionAuditPort(Protocol):
+    def start(self, run: PipelineRun) -> None: ...
+
+    def record_step(self, step: PipelineStepAudit) -> None: ...
+
+    def succeed(self, run_id: str, *, answer: str, citation_count: int) -> None: ...
+
+    def fail(self, run_id: str, *, error_code: str, error_message: str) -> None: ...

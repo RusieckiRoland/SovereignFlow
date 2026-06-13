@@ -9,9 +9,12 @@ from typing import Any
 
 import pytest
 
+from sovereignflow.application import PipelineEngine, RagQueryService, default_action_registry
 from sovereignflow.domain import (
     DocumentChunk,
     DomainProfile,
+    PipelineDefinition,
+    PipelineStepDefinition,
     RetrievalProfile,
     SearchHit,
     SearchMode,
@@ -61,6 +64,77 @@ class StubPrompts:
     def load(self, name: str) -> str:
         self.names.append(name)
         return self.value
+
+
+class StubAudit:
+    def __init__(self) -> None:
+        self.started = []
+        self.steps = []
+        self.succeeded = []
+        self.failed = []
+
+    def start(self, run) -> None:
+        self.started.append(run)
+
+    def record_step(self, step) -> None:
+        self.steps.append(step)
+
+    def succeed(self, run_id: str, **kwargs) -> None:
+        self.succeeded.append((run_id, kwargs))
+
+    def fail(self, run_id: str, **kwargs) -> None:
+        self.failed.append((run_id, kwargs))
+
+
+def default_pipeline() -> PipelineDefinition:
+    action_ids = (
+        "normalize_query",
+        "retrieve",
+        "build_context",
+        "call_model",
+        "finalize",
+    )
+    return PipelineDefinition(
+        name="default-rag",
+        behavior_version="1.0",
+        entry_step_id=action_ids[0],
+        max_steps=len(action_ids),
+        steps=tuple(
+            PipelineStepDefinition(
+                step_id=action_id,
+                action=action_id,
+                action_version="1.0",
+                next_step_id=action_ids[index + 1] if index + 1 < len(action_ids) else None,
+                terminal=index + 1 == len(action_ids),
+            )
+            for index, action_id in enumerate(action_ids)
+        ),
+        checksum="a" * 64,
+    )
+
+
+def build_query_service(
+    *,
+    domain: DomainProfile,
+    retrieval,
+    model,
+    prompts,
+    audit: StubAudit | None = None,
+) -> RagQueryService:
+    selected_audit = audit or StubAudit()
+    return RagQueryService(
+        domain=domain,
+        retrieval=retrieval,
+        model=model,
+        prompts=prompts,
+        pipeline=default_pipeline(),
+        engine=PipelineEngine(
+            registry=default_action_registry(),
+            audit=selected_audit,
+            monotonic=lambda: 1.0,
+            run_id_factory=lambda: "00000000-0000-0000-0000-000000000001",
+        ),
+    )
 
 
 @pytest.fixture

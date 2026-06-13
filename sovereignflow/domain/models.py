@@ -85,12 +85,13 @@ class DomainProfile:
     prompt_name: str
     allow_external_model: bool
     retrieval: RetrievalProfile
+    pipeline_name: str = "default"
     disclaimer: str = ""
     allowed_acl_labels: tuple[str, ...] = ()
     max_classification_level: int | None = None
 
     def __post_init__(self) -> None:
-        for field_name in ("name", "collection", "tenant_id", "prompt_name"):
+        for field_name in ("name", "collection", "tenant_id", "prompt_name", "pipeline_name"):
             object.__setattr__(
                 self,
                 field_name,
@@ -194,3 +195,132 @@ class QueryResult:
     session_id: str
     citations: tuple[Citation, ...]
     pipeline_trace: tuple[str, ...]
+
+
+class PipelineRunStatus(StrEnum):
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+
+
+@dataclass(frozen=True)
+class PipelineStepDefinition:
+    step_id: str
+    action: str
+    action_version: str
+    next_step_id: str | None = None
+    routes: Mapping[str, str] = field(default_factory=dict)
+    terminal: bool = False
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "step_id",
+            _required(self.step_id, "PipelineStepDefinition.step_id"),
+        )
+        object.__setattr__(self, "action", _required(self.action, "PipelineStepDefinition.action"))
+        object.__setattr__(
+            self,
+            "action_version",
+            _required(self.action_version, "PipelineStepDefinition.action_version"),
+        )
+        if self.next_step_id is not None:
+            object.__setattr__(
+                self,
+                "next_step_id",
+                _required(self.next_step_id, "PipelineStepDefinition.next_step_id"),
+            )
+        normalized_routes = {
+            _required(key, "PipelineStepDefinition.routes key"): _required(
+                value,
+                "PipelineStepDefinition.routes value",
+            )
+            for key, value in self.routes.items()
+        }
+        object.__setattr__(self, "routes", MappingProxyType(normalized_routes))
+        if self.terminal and (self.next_step_id is not None or self.routes):
+            raise ValidationError("A terminal pipeline step cannot define transitions")
+        if not self.terminal and self.next_step_id is None and not self.routes:
+            raise ValidationError("A non-terminal pipeline step must define a transition")
+
+
+@dataclass(frozen=True)
+class PipelineDefinition:
+    name: str
+    behavior_version: str
+    entry_step_id: str
+    max_steps: int
+    steps: tuple[PipelineStepDefinition, ...]
+    checksum: str
+
+    def __post_init__(self) -> None:
+        for field_name in ("name", "behavior_version", "entry_step_id", "checksum"):
+            object.__setattr__(
+                self,
+                field_name,
+                _required(getattr(self, field_name), f"PipelineDefinition.{field_name}"),
+            )
+        if self.max_steps < 1:
+            raise ValidationError("PipelineDefinition.max_steps must be greater than zero")
+        if not self.steps:
+            raise ValidationError("PipelineDefinition.steps cannot be empty")
+
+    def step(self, step_id: str) -> PipelineStepDefinition:
+        for step in self.steps:
+            if step.step_id == step_id:
+                return step
+        raise ValidationError(f"Unknown pipeline step: {step_id}")
+
+
+@dataclass(frozen=True)
+class PipelineRun:
+    run_id: str
+    request_id: str
+    session_id: str
+    domain: str
+    tenant_id: str
+    pipeline_name: str
+    pipeline_version: str
+    pipeline_checksum: str
+    query: str
+
+    def __post_init__(self) -> None:
+        for field_name in (
+            "run_id",
+            "request_id",
+            "session_id",
+            "domain",
+            "tenant_id",
+            "pipeline_name",
+            "pipeline_version",
+            "pipeline_checksum",
+            "query",
+        ):
+            object.__setattr__(
+                self,
+                field_name,
+                _required(getattr(self, field_name), f"PipelineRun.{field_name}"),
+            )
+
+
+@dataclass(frozen=True)
+class PipelineStepAudit:
+    run_id: str
+    sequence_number: int
+    step_id: str
+    action: str
+    action_version: str
+    duration_ms: int
+    next_step_id: str | None
+
+    def __post_init__(self) -> None:
+        for field_name in ("run_id", "step_id", "action", "action_version"):
+            object.__setattr__(
+                self,
+                field_name,
+                _required(getattr(self, field_name), f"PipelineStepAudit.{field_name}"),
+            )
+        if self.sequence_number < 1:
+            raise ValidationError("PipelineStepAudit.sequence_number must be greater than zero")
+        if self.duration_ms < 0:
+            raise ValidationError("PipelineStepAudit.duration_ms cannot be negative")

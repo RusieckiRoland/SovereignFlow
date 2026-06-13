@@ -12,6 +12,8 @@ from sovereignflow.domain import ConfigurationError, SearchMode
 def valid_files(tmp_path: Path) -> tuple[Path, dict]:
     prompts = tmp_path / "prompts"
     prompts.mkdir()
+    pipelines = tmp_path / "pipelines"
+    pipelines.mkdir()
     (prompts / "answer.txt").write_text("Use evidence.", encoding="utf-8")
     domain = tmp_path / "domain.yaml"
     domain.write_text(
@@ -22,6 +24,7 @@ def valid_files(tmp_path: Path) -> tuple[Path, dict]:
                 "collection": "General",
                 "tenant_id": "tenant-a",
                 "prompt_name": "answer",
+                "pipeline_name": "default",
                 "allow_external_model": False,
                 "disclaimer": "Verify.",
                 "allowed_acl_labels": ["public"],
@@ -66,6 +69,7 @@ def valid_files(tmp_path: Path) -> tuple[Path, dict]:
             "api_key_env": "TEST_WEAVIATE_KEY",
         },
         "prompts_root": "prompts",
+        "pipelines_root": "pipelines",
         "domains": ["domain.yaml"],
     }
     config_path = tmp_path / "config.yaml"

@@ -3,9 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import pytest
-from conftest import StubModel, StubPrompts, StubRetrieval
+from conftest import StubModel, StubPrompts, StubRetrieval, build_query_service
 
-from sovereignflow.application import RagQueryService
 from sovereignflow.domain import DependencyUnavailableError
 from sovereignflow.interfaces import QueryDispatcher, create_app
 
@@ -21,7 +20,7 @@ class Probe:
 
 
 def application(domain_profile, search_hit):
-    service = RagQueryService(
+    service = build_query_service(
         domain=domain_profile,
         retrieval=StubRetrieval((search_hit,)),
         model=StubModel(answer="API answer."),

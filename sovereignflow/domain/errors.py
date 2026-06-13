@@ -38,3 +38,12 @@ class DependencyUnavailableError(SovereignFlowError):
 class ConfigurationError(SovereignFlowError):
     code = "configuration_error"
     http_status = 500
+
+
+class PipelineDefinitionError(ConfigurationError):
+    code = "pipeline_definition_error"
+
+
+class PipelineExecutionError(SovereignFlowError):
+    code = "pipeline_execution_error"
+    http_status = 500

@@ -3,9 +3,8 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
-from conftest import StubModel, StubPrompts, StubRetrieval
+from conftest import StubAudit, StubModel, StubPrompts, StubRetrieval, build_query_service
 
-from sovereignflow.application import RagQueryService
 from sovereignflow.domain import (
     DocumentChunk,
     PolicyViolationError,
@@ -31,11 +30,13 @@ def test_query_service_executes_complete_vertical_flow(
     retrieval = StubRetrieval((search_hit,))
     model = StubModel(answer="Grounded answer.")
     prompts = StubPrompts()
-    service = RagQueryService(
+    audit = StubAudit()
+    service = build_query_service(
         domain=domain_profile,
         retrieval=retrieval,
         model=model,
         prompts=prompts,
+        audit=audit,
     )
 
     assert service.domain_name == "general"
@@ -57,11 +58,14 @@ def test_query_service_executes_complete_vertical_flow(
     }
     assert "Evidence text." in model.calls[0]["user_prompt"]
     assert prompts.names == ["answer"]
+    assert audit.started[0].pipeline_checksum == "a" * 64
+    assert [item.step_id for item in audit.steps] == list(result.pipeline_trace)
+    assert audit.succeeded[0][1]["citation_count"] == 1
 
 
 def test_query_service_uses_explicit_no_evidence_message(domain_profile) -> None:
     model = StubModel(answer="Insufficient evidence.")
-    service = RagQueryService(
+    service = build_query_service(
         domain=replace(domain_profile, disclaimer=""),
         retrieval=StubRetrieval(),
         model=model,
@@ -85,7 +89,7 @@ def test_context_is_truncated_at_configured_limit(domain_profile, search_hit) ->
         chunk=replace(search_hit.chunk, chunk_id="chunk-2", source_id="source-2"),
     )
     model = StubModel()
-    service = RagQueryService(
+    service = build_query_service(
         domain=domain,
         retrieval=StubRetrieval((search_hit, second)),
         model=model,
@@ -108,7 +112,7 @@ def test_context_is_truncated_at_configured_limit(domain_profile, search_hit) ->
 
 def test_external_model_requires_domain_permission(domain_profile) -> None:
     with pytest.raises(PolicyViolationError, match="does not allow external"):
-        RagQueryService(
+        build_query_service(
             domain=domain_profile,
             retrieval=StubRetrieval(),
             model=StubModel(scope="external"),
@@ -117,7 +121,7 @@ def test_external_model_requires_domain_permission(domain_profile) -> None:
 
 
 def test_query_domain_must_match_service(domain_profile) -> None:
-    service = RagQueryService(
+    service = build_query_service(
         domain=domain_profile,
         retrieval=StubRetrieval(),
         model=StubModel(),
@@ -168,7 +172,7 @@ def test_query_service_rechecks_retrieval_security_boundary(
     chunk,
     message: str,
 ) -> None:
-    service = RagQueryService(
+    service = build_query_service(
         domain=domain_profile,
         retrieval=StubRetrieval((SearchHit(chunk, 1.0, "hybrid"),)),
         model=StubModel(),

@@ -6,7 +6,13 @@ from typing import Any
 
 from flask import Flask
 
-from sovereignflow.application import HealthProbe, RagQueryService
+from sovereignflow.application import (
+    HealthProbe,
+    PipelineEngine,
+    PipelineValidator,
+    RagQueryService,
+    default_action_registry,
+)
 from sovereignflow.domain import DependencyUnavailableError
 from sovereignflow.infrastructure import (
     EmbeddingEndpoint,
@@ -14,9 +20,11 @@ from sovereignflow.infrastructure import (
     ModelEndpoint,
     OpenAIEmbeddingGateway,
     OpenAIModelGateway,
+    PostgreSQLExecutionAudit,
     PostgreSQLHealthProbe,
     WeaviateHealthProbe,
     WeaviateRetrievalAdapter,
+    YamlPipelineRepository,
 )
 from sovereignflow.interfaces import QueryDispatcher, create_app
 
@@ -63,11 +71,22 @@ def bootstrap(settings: SovereignFlowSettings) -> BootstrappedApplication:
         )
     )
     prompts = FilePromptRepository(settings.prompts_root)
+    pipelines = YamlPipelineRepository(settings.pipelines_root)
+    audit = PostgreSQLExecutionAudit(
+        settings.postgresql.connection_url,
+        timeout_seconds=settings.postgresql.timeout_seconds,
+    )
+    audit.migrate()
+    registry = default_action_registry()
+    validator = PipelineValidator(registry)
+    engine = PipelineEngine(registry=registry, audit=audit)
     client = _connect_weaviate(settings)
     try:
         services: dict[str, RagQueryService] = {}
         retrieval_probes: list[HealthProbe] = []
         for domain in settings.domains:
+            pipeline = pipelines.load(domain.pipeline_name)
+            validator.validate(pipeline)
             retrieval = WeaviateRetrievalAdapter(
                 client=client,
                 collection_name=domain.collection,
@@ -80,6 +99,8 @@ def bootstrap(settings: SovereignFlowSettings) -> BootstrappedApplication:
                 retrieval=retrieval,
                 model=model,
                 prompts=prompts,
+                pipeline=pipeline,
+                engine=engine,
             )
             retrieval_probes.append(
                 _GatewayHealthProbe(
@@ -93,6 +114,7 @@ def bootstrap(settings: SovereignFlowSettings) -> BootstrappedApplication:
                 settings.postgresql.connection_url,
                 timeout_seconds=settings.postgresql.timeout_seconds,
             ),
+            audit,
             WeaviateHealthProbe(client),
             _GatewayHealthProbe(name="embeddings", gateway=embeddings),
             _GatewayHealthProbe(name="model", gateway=model),

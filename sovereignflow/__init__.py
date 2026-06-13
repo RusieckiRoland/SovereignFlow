@@ -1,4 +1,4 @@
-from .application import RagQueryService
+from .application import PipelineEngine, PipelineValidator, RagQueryService
 from .domain import (
     Citation,
     ConfigurationError,
@@ -6,6 +6,13 @@ from .domain import (
     DocumentChunk,
     DomainNotFoundError,
     DomainProfile,
+    PipelineDefinition,
+    PipelineDefinitionError,
+    PipelineExecutionError,
+    PipelineRun,
+    PipelineRunStatus,
+    PipelineStepAudit,
+    PipelineStepDefinition,
     PolicyViolationError,
     ProviderProtocolError,
     QueryCommand,
@@ -25,6 +32,15 @@ __all__ = [
     "DocumentChunk",
     "DomainNotFoundError",
     "DomainProfile",
+    "PipelineDefinition",
+    "PipelineDefinitionError",
+    "PipelineEngine",
+    "PipelineExecutionError",
+    "PipelineRun",
+    "PipelineRunStatus",
+    "PipelineStepAudit",
+    "PipelineStepDefinition",
+    "PipelineValidator",
     "PolicyViolationError",
     "ProviderProtocolError",
     "QueryCommand",
@@ -38,4 +54,4 @@ __all__ = [
     "ValidationError",
 ]
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"

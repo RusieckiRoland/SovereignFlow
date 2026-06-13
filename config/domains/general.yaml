@@ -3,6 +3,7 @@ description: General-purpose knowledge assistant
 collection: SovereignFlowGeneral
 tenant_id: default
 prompt_name: answer
+pipeline_name: default
 allow_external_model: false
 disclaimer: |
   This response is generated from retrieved source material and should be verified by the user.

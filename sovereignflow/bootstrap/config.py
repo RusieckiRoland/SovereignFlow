@@ -65,6 +65,7 @@ class SovereignFlowSettings:
     embeddings: EmbeddingSettings
     selected_model: ModelSettings
     prompts_root: Path
+    pipelines_root: Path
     domains: tuple[DomainProfile, ...]
 
 
@@ -91,6 +92,11 @@ def load_settings(path: str | Path) -> SovereignFlowSettings:
         config_path.parent,
         _required(raw.get("prompts_root"), "prompts_root"),
         "prompts_root",
+    )
+    pipelines_root = _resolve_existing_directory(
+        config_path.parent,
+        _required(raw.get("pipelines_root"), "pipelines_root"),
+        "pipelines_root",
     )
     domain_paths = raw.get("domains")
     if not isinstance(domain_paths, list) or not domain_paths:
@@ -151,6 +157,7 @@ def load_settings(path: str | Path) -> SovereignFlowSettings:
         ),
         selected_model=selected,
         prompts_root=prompt_root,
+        pipelines_root=pipelines_root,
         domains=domains,
     )
 
@@ -194,6 +201,7 @@ def _load_domain(path: Path) -> DomainProfile:
         collection=_required(raw.get("collection"), "collection"),
         tenant_id=_required(raw.get("tenant_id"), "tenant_id"),
         prompt_name=_required(raw.get("prompt_name"), "prompt_name"),
+        pipeline_name=_required(raw.get("pipeline_name"), "pipeline_name"),
         allow_external_model=_required_bool(
             raw.get("allow_external_model"),
             "allow_external_model",

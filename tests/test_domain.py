@@ -8,6 +8,11 @@ from sovereignflow.domain import (
     Citation,
     DocumentChunk,
     DomainProfile,
+    PipelineDefinition,
+    PipelineRun,
+    PipelineRunStatus,
+    PipelineStepAudit,
+    PipelineStepDefinition,
     QueryCommand,
     RetrievalProfile,
     SearchHit,
@@ -166,3 +171,70 @@ def test_search_and_citation_models_preserve_score_metadata() -> None:
 
     assert hit.score == 1.0
     assert citation.metadata["x"] == 1
+
+
+def test_pipeline_models_validate_invariants() -> None:
+    assert PipelineRunStatus.RUNNING.value == "running"
+    terminal = PipelineStepDefinition("end", "finalize", "1.0", terminal=True)
+    pipeline = PipelineDefinition("p", "1.0", "end", 1, (terminal,), "a" * 64)
+    assert pipeline.step("end") == terminal
+
+    with pytest.raises(ValidationError, match="Unknown pipeline step"):
+        pipeline.step("missing")
+    with pytest.raises(ValidationError, match="max_steps"):
+        PipelineDefinition("p", "1.0", "end", 0, (terminal,), "a" * 64)
+    with pytest.raises(ValidationError, match="cannot be empty"):
+        PipelineDefinition("p", "1.0", "end", 1, (), "a" * 64)
+    with pytest.raises(ValidationError, match="terminal"):
+        PipelineStepDefinition(
+            "end",
+            "finalize",
+            "1.0",
+            next_step_id="other",
+            terminal=True,
+        )
+    with pytest.raises(ValidationError, match="non-terminal"):
+        PipelineStepDefinition("start", "normalize_query", "1.0")
+    routed = PipelineStepDefinition(
+        "route",
+        "router",
+        "1.0",
+        routes={" selected ": " end "},
+    )
+    assert dict(routed.routes) == {"selected": "end"}
+    with pytest.raises(ValidationError, match="routes key"):
+        PipelineStepDefinition("route", "router", "1.0", routes={"": "end"})
+
+
+def test_pipeline_audit_models_require_valid_values() -> None:
+    run = PipelineRun(
+        "run",
+        "request",
+        "session",
+        "domain",
+        "tenant",
+        "pipeline",
+        "1.0",
+        "a" * 64,
+        "query",
+    )
+    assert run.run_id == "run"
+    with pytest.raises(ValidationError, match="PipelineRun.query"):
+        PipelineRun(
+            "run",
+            "request",
+            "session",
+            "domain",
+            "tenant",
+            "pipeline",
+            "1.0",
+            "a" * 64,
+            "",
+        )
+
+    audit = PipelineStepAudit("run", 1, "step", "action", "1.0", 0, None)
+    assert audit.duration_ms == 0
+    with pytest.raises(ValidationError, match="sequence_number"):
+        PipelineStepAudit("run", 0, "step", "action", "1.0", 0, None)
+    with pytest.raises(ValidationError, match="duration_ms"):
+        PipelineStepAudit("run", 1, "step", "action", "1.0", -1, None)

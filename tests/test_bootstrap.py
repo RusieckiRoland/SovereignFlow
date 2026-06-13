@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from conftest import StubAudit, default_pipeline
 
 from sovereignflow.bootstrap.application import (
     _connect_weaviate,
@@ -64,6 +65,31 @@ class Prompts:
         return "prompt"
 
 
+class Pipelines:
+    def __init__(self, root) -> None:
+        self.root = root
+
+    def load(self, name: str):
+        return default_pipeline()
+
+
+class Audit(StubAudit):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__()
+        self.migrated = 0
+        self.checked = 0
+
+    @property
+    def name(self) -> str:
+        return "execution_audit"
+
+    def migrate(self) -> None:
+        self.migrated += 1
+
+    def check(self) -> None:
+        self.checked += 1
+
+
 def settings(tmp_path: Path) -> SovereignFlowSettings:
     return SovereignFlowSettings(
         config_path=tmp_path / "config.yaml",
@@ -80,6 +106,7 @@ def settings(tmp_path: Path) -> SovereignFlowSettings:
             5,
         ),
         prompts_root=tmp_path,
+        pipelines_root=tmp_path,
         domains=(
             DomainProfile(
                 "general",
@@ -111,6 +138,14 @@ def test_bootstrap_builds_and_validates_complete_application(monkeypatch, tmp_pa
     monkeypatch.setattr(
         "sovereignflow.bootstrap.application.FilePromptRepository",
         Prompts,
+    )
+    monkeypatch.setattr(
+        "sovereignflow.bootstrap.application.YamlPipelineRepository",
+        Pipelines,
+    )
+    monkeypatch.setattr(
+        "sovereignflow.bootstrap.application.PostgreSQLExecutionAudit",
+        Audit,
     )
     monkeypatch.setattr(
         "sovereignflow.bootstrap.application.WeaviateRetrievalAdapter",
@@ -154,6 +189,14 @@ def test_bootstrap_closes_client_when_construction_fails(monkeypatch, tmp_path) 
     monkeypatch.setattr(
         "sovereignflow.bootstrap.application.FilePromptRepository",
         Prompts,
+    )
+    monkeypatch.setattr(
+        "sovereignflow.bootstrap.application.YamlPipelineRepository",
+        Pipelines,
+    )
+    monkeypatch.setattr(
+        "sovereignflow.bootstrap.application.PostgreSQLExecutionAudit",
+        Audit,
     )
     monkeypatch.setattr(
         "sovereignflow.bootstrap.application.WeaviateRetrievalAdapter",
