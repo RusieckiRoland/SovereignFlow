@@ -1,0 +1,21 @@
+server:
+  host: 127.0.0.1
+  port: 8000
+
+model_policy: local_only
+
+models:
+  - name: local-default
+    scope: local
+    base_url: http://127.0.0.1:8080/v1
+    model: local-model
+
+retrieval:
+  provider: weaviate
+  host: 127.0.0.1
+  http_port: 18080
+  grpc_port: 15005
+
+domains:
+  - config/domains/general.yaml
+

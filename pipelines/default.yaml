@@ -1,0 +1,25 @@
+pipeline:
+  name: default-rag
+  entry_step: normalize_query
+  behavior_version: 1
+  steps:
+    - id: normalize_query
+      action: normalize_query
+      next: retrieve
+
+    - id: retrieve
+      action: retrieve
+      next: build_context
+
+    - id: build_context
+      action: build_context
+      next: call_model
+
+    - id: call_model
+      action: call_model
+      next: finalize
+
+    - id: finalize
+      action: finalize
+      end: true
+
