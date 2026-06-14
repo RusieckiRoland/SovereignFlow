@@ -6,7 +6,7 @@ import uuid
 import pytest
 
 from sovereignflow.domain import PipelineRun, PipelineStepAudit
-from sovereignflow.infrastructure import PostgreSQLExecutionAudit
+from sovereignflow.infrastructure import PostgreSQLExecutionAudit, PostgreSQLMigrationRunner
 
 
 @pytest.mark.integration
@@ -14,9 +14,10 @@ def test_postgresql_execution_audit_round_trip() -> None:
     connection_url = os.getenv("SOVEREIGNFLOW_TEST_POSTGRES_URL")
     if not connection_url:
         pytest.skip("SOVEREIGNFLOW_TEST_POSTGRES_URL is not configured")
+    migrations = PostgreSQLMigrationRunner(connection_url, timeout_seconds=5)
+    migrations.migrate()
+    migrations.migrate()
     repository = PostgreSQLExecutionAudit(connection_url, timeout_seconds=5)
-    repository.migrate()
-    repository.migrate()
     repository.check()
 
     successful_run_id = str(uuid.uuid4())

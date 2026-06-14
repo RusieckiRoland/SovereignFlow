@@ -11,17 +11,17 @@ It is extracted from the architectural lessons of LocalAI-RAG, but it is not a c
 - **No runtime provider fallback** — one model endpoint is selected before a request; its failure fails the request.
 - **Evidence before answers** — responses retain citations and source metadata.
 - **PostgreSQL-backed execution audit** — pipeline runs, completed steps, results, and safe failures are stored durably.
+- **Transactional document ingestion** — source versions, chunks, idempotency keys, and indexing jobs are committed atomically.
 - **Weaviate for retrieval** — semantic, keyword, and hybrid search use generic document chunks.
 - **Domain behavior through profiles** — prompts, disclaimers, collections, filters, and retrieval defaults live outside the core.
 - **Versioned pipeline behavior** — YAML steps pin action behavior versions and are validated before startup.
-- **Durable execution audit** — PostgreSQL stores every run, completed step, result, and safe failure.
 
 ## What belongs outside the core
 
 Domain repositories such as TaricAI provide:
 
 - source-specific importers,
-- relational schemas,
+- domain-specific relational schemas,
 - synchronization state,
 - domain validation,
 - domain prompts and policies,
@@ -29,7 +29,7 @@ Domain repositories such as TaricAI provide:
 
 They depend on SovereignFlow rather than copy it.
 
-PostgreSQL storage for domain records and synchronization state belongs to those domain packages. The current SovereignFlow schema stores pipeline execution audit only.
+PostgreSQL storage for domain records and synchronization state belongs to those domain packages. SovereignFlow stores only neutral execution-audit and document-ingestion records.
 
 ## Generic data model
 
@@ -49,7 +49,17 @@ classification_level
 
 No field is specific to source code or customs classification.
 
-The `DocumentChunk` contract and retrieval adapter already exist. Stage 2 does not yet provide a generic ingestion API or automatic Weaviate collection creation.
+Domain importers submit immutable `IngestionCommand` objects containing already prepared chunks. SovereignFlow does not guess source parsing or chunking rules.
+
+The ingestion service:
+
+1. validates tenant, domain, ACL, and classification boundaries;
+2. atomically stores the source version, chunks, idempotency key, and indexing job in PostgreSQL;
+3. calculates embeddings through the configured embedding service;
+4. replaces the source version in Weaviate;
+5. marks the PostgreSQL source pointer as current only after indexing succeeds.
+
+Failed indexing jobs remain explicit and can be retried by job identifier. No hidden fallback or silent data loss is permitted.
 
 ## Local/external model selection
 
@@ -116,7 +126,6 @@ SovereignFlow has no in-memory or fake runtime mode. The server starts only when
 
 - PostgreSQL,
 - authenticated Weaviate,
-- the configured Weaviate collections,
 - one selected model endpoint,
 - one embedding endpoint,
 - prompt files,
@@ -192,17 +201,16 @@ Verify the containers:
 docker compose ps
 ```
 
-### 5. Create the configured Weaviate collection
+### 5. Weaviate collection migrations
 
-SovereignFlow currently validates collection existence but does not create or migrate collections automatically.
-
-For the example domain, an administrator or domain importer must create a collection named `SovereignFlowGeneral` before starting the API. It must use self-provided vectors and contain these properties:
+SovereignFlow creates missing configured collections during startup and validates existing schemas exactly. Collections use self-provided vectors and these properties:
 
 ```text
 chunk_id
 domain
 tenant_id
 source_id
+source_version
 source_uri
 text
 metadata_json
@@ -210,11 +218,9 @@ acl_labels
 classification_level
 ```
 
-The property names must match exactly. `metadata_json` stores a serialized JSON object. The collection must be populated with vectors produced by the same embedding model configured for query embeddings.
+The property names and types must match exactly. Schema drift prevents startup. `metadata_json` stores a serialized JSON object, while vectors are produced by the configured embedding service.
 
-Automatic collection migrations and generic document ingestion are planned for the next stage.
-
-An empty collection is sufficient for the startup health check, but meaningful queries require indexed objects and vectors.
+An empty collection is valid, but meaningful queries require a domain importer to submit ingestion commands.
 
 ### 6. Start model and embedding services
 
@@ -242,7 +248,7 @@ The CLI runs Flask through Waitress. Before opening the HTTP API it:
 
 1. applies checksummed PostgreSQL migrations,
 2. loads and validates every configured pipeline,
-3. validates prompt files and Weaviate collections,
+3. creates or validates Weaviate collections and prompt files,
 4. checks PostgreSQL, Weaviate, embeddings, and the selected model.
 
 If any required dependency or contract is invalid, startup fails.
@@ -268,6 +274,7 @@ Expected readiness response:
   "components": {
     "postgresql": "ready",
     "execution_audit": "ready",
+    "ingestion_repository": "ready",
     "weaviate": "ready",
     "embeddings": "ready",
     "model": "ready",
@@ -310,21 +317,27 @@ python -m pytest --cov=sovereignflow --cov-branch --cov-report=term-missing
 
 The project enforces 100% statement and branch coverage.
 
-Run integration tests that do not require PostgreSQL:
+Run protocol integration tests; tests requiring external services are skipped unless configured:
 
 ```bash
 python -m pytest -m integration
 ```
 
-To include the real PostgreSQL audit integration test, start PostgreSQL and provide its URL:
+To include the real PostgreSQL and Weaviate ingestion tests, start both services and provide their connection settings:
 
 ```bash
-export WEAVIATE_API_KEY='not-used-when-starting-only-postgres'
+export WEAVIATE_API_KEY='test-weaviate-key'
 export POSTGRES_PASSWORD='test-password'
 export SOVEREIGNFLOW_POSTGRES_PORT=25432
-docker compose up -d postgres
+export SOVEREIGNFLOW_WEAVIATE_HTTP_PORT=28080
+export SOVEREIGNFLOW_WEAVIATE_GRPC_PORT=25005
+docker compose up -d postgres weaviate
 
 export SOVEREIGNFLOW_TEST_POSTGRES_URL='postgresql://sovereignflow:test-password@127.0.0.1:25432/sovereignflow'
+export SOVEREIGNFLOW_TEST_WEAVIATE_HOST='127.0.0.1'
+export SOVEREIGNFLOW_TEST_WEAVIATE_HTTP_PORT=28080
+export SOVEREIGNFLOW_TEST_WEAVIATE_GRPC_PORT=25005
+export SOVEREIGNFLOW_TEST_WEAVIATE_API_KEY="$WEAVIATE_API_KEY"
 python -m pytest -m integration
 
 docker compose down
@@ -340,16 +353,16 @@ python -m compileall -q sovereignflow tests
 
 ## Current limitations
 
-Stage 2 intentionally does not yet include:
+Stage 3 intentionally does not yet include:
 
-- generic document ingestion,
-- automatic Weaviate collection creation or migration,
 - graph relationship storage and traversal,
 - authenticated execution-history API,
 - domain-specific PostgreSQL schemas,
 - domain synchronization workers,
+- source-specific parsing or chunking,
+- a public ingestion endpoint without authenticated service identity,
 - model or embedding fallbacks.
 
 ## Status
 
-Stage 2 is complete: the reusable foundation now includes a contract-validated pipeline engine and PostgreSQL-backed execution audit. The next milestones are ingestion, explicit Weaviate collection migrations, graph relationships, and the first domain package.
+Stage 3 is complete: the reusable foundation now includes versioned and idempotent document ingestion, PostgreSQL-backed job state, batch embeddings, exact Weaviate collection migrations, and source replacement verified against real PostgreSQL and Weaviate services. The next milestones are neutral graph relationships, observability, and the first domain package.

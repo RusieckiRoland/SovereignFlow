@@ -324,3 +324,92 @@ class PipelineStepAudit:
             raise ValidationError("PipelineStepAudit.sequence_number must be greater than zero")
         if self.duration_ms < 0:
             raise ValidationError("PipelineStepAudit.duration_ms cannot be negative")
+
+
+class IngestionJobStatus(StrEnum):
+    STAGED = "staged"
+    INDEXING = "indexing"
+    INDEXED = "indexed"
+    FAILED = "failed"
+
+
+@dataclass(frozen=True)
+class IngestionCommand:
+    idempotency_key: str
+    domain: str
+    tenant_id: str
+    source_id: str
+    source_version: str
+    chunks: tuple[DocumentChunk, ...]
+    source_uri: str | None = None
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        for field_name in (
+            "idempotency_key",
+            "domain",
+            "tenant_id",
+            "source_id",
+            "source_version",
+        ):
+            object.__setattr__(
+                self,
+                field_name,
+                _required(getattr(self, field_name), f"IngestionCommand.{field_name}"),
+            )
+        if not self.chunks:
+            raise ValidationError("IngestionCommand.chunks cannot be empty")
+        chunk_ids: set[str] = set()
+        for chunk in self.chunks:
+            if (
+                chunk.domain != self.domain
+                or chunk.tenant_id != self.tenant_id
+                or chunk.source_id != self.source_id
+            ):
+                raise ValidationError(
+                    "Every ingestion chunk must match command domain, tenant and source"
+                )
+            if chunk.chunk_id in chunk_ids:
+                raise ValidationError(f"Duplicate ingestion chunk id: {chunk.chunk_id}")
+            chunk_ids.add(chunk.chunk_id)
+        object.__setattr__(self, "metadata", _immutable_mapping(self.metadata))
+
+
+@dataclass(frozen=True)
+class IngestionJob:
+    job_id: str
+    payload_hash: str
+    status: IngestionJobStatus
+    command: IngestionCommand
+    attempts: int = 0
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "job_id", _required(self.job_id, "IngestionJob.job_id"))
+        object.__setattr__(
+            self,
+            "payload_hash",
+            _required(self.payload_hash, "IngestionJob.payload_hash"),
+        )
+        if self.attempts < 0:
+            raise ValidationError("IngestionJob.attempts cannot be negative")
+
+
+@dataclass(frozen=True)
+class IngestionResult:
+    job_id: str
+    domain: str
+    tenant_id: str
+    source_id: str
+    source_version: str
+    status: IngestionJobStatus
+    chunk_count: int
+
+    def __post_init__(self) -> None:
+        for field_name in ("job_id", "domain", "tenant_id", "source_id", "source_version"):
+            object.__setattr__(
+                self,
+                field_name,
+                _required(getattr(self, field_name), f"IngestionResult.{field_name}"),
+            )
+        if self.chunk_count < 1:
+            raise ValidationError("IngestionResult.chunk_count must be greater than zero")

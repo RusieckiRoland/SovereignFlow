@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import urllib.error
 import urllib.request
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -166,19 +167,37 @@ class OpenAIEmbeddingGateway:
         )
 
     def embed_query(self, text: str) -> tuple[float, ...]:
+        return self.embed_documents((text,))[0]
+
+    def embed_documents(self, texts: Sequence[str]) -> tuple[tuple[float, ...], ...]:
+        normalized = tuple(str(text or "").strip() for text in texts)
+        if not normalized or any(not text for text in normalized):
+            raise ValidationError("Embedding input must contain non-empty texts")
         response = self._http.post(
             url=f"{self._endpoint.base_url.rstrip('/')}/embeddings",
             api_key=self._endpoint.api_key,
             timeout_seconds=self._endpoint.timeout_seconds,
-            payload={"model": self._endpoint.model, "input": text},
+            payload={"model": self._endpoint.model, "input": list(normalized)},
         )
         try:
-            vector = response["data"][0]["embedding"]
-        except (KeyError, IndexError, TypeError) as exc:
+            rows = response["data"]
+            if not isinstance(rows, list) or not rows:
+                raise TypeError("data must be a non-empty list")
+            if len(rows) != len(normalized):
+                raise ProviderProtocolError("Embedding response count does not match input")
+            ordered = sorted(rows, key=lambda item: int(item["index"]))
+            if [int(item["index"]) for item in ordered] != list(range(len(normalized))):
+                raise ValueError("embedding indexes must match inputs")
+            vectors = tuple(item["embedding"] for item in ordered)
+        except (KeyError, TypeError, ValueError) as exc:
             raise ProviderProtocolError("Embedding response has an invalid schema") from exc
-        if not isinstance(vector, list) or not vector:
+        if any(not isinstance(vector, list) or not vector for vector in vectors):
             raise ProviderProtocolError("Embedding response contains no vector")
         try:
-            return tuple(float(value) for value in vector)
+            converted = tuple(tuple(float(value) for value in vector) for vector in vectors)
         except (TypeError, ValueError) as exc:
             raise ProviderProtocolError("Embedding vector must contain numbers") from exc
+        dimensions = {len(vector) for vector in converted}
+        if len(dimensions) != 1:
+            raise ProviderProtocolError("Embedding vectors have inconsistent dimensions")
+        return converted

@@ -3,7 +3,14 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Protocol
 
-from sovereignflow.domain import PipelineRun, PipelineStepAudit, SearchHit, SearchRequest
+from sovereignflow.domain import (
+    IngestionCommand,
+    IngestionJob,
+    PipelineRun,
+    PipelineStepAudit,
+    SearchHit,
+    SearchRequest,
+)
 
 
 class RetrievalPort(Protocol):
@@ -14,6 +21,8 @@ class RetrievalPort(Protocol):
 
 class EmbeddingGatewayPort(Protocol):
     def embed_query(self, text: str) -> Sequence[float]: ...
+
+    def embed_documents(self, texts: Sequence[str]) -> Sequence[Sequence[float]]: ...
 
     def healthcheck(self) -> None: ...
 
@@ -46,3 +55,19 @@ class ExecutionAuditPort(Protocol):
     def succeed(self, run_id: str, *, answer: str, citation_count: int) -> None: ...
 
     def fail(self, run_id: str, *, error_code: str, error_message: str) -> None: ...
+
+
+class IngestionRepositoryPort(Protocol):
+    def stage(self, command: IngestionCommand, *, payload_hash: str) -> IngestionJob: ...
+
+    def load(self, job_id: str) -> IngestionJob: ...
+
+    def mark_indexing(self, job_id: str) -> None: ...
+
+    def mark_indexed(self, job_id: str) -> None: ...
+
+    def mark_failed(self, job_id: str, *, error_code: str, error_message: str) -> None: ...
+
+
+class VectorIndexPort(Protocol):
+    def replace_source(self, job: IngestionJob, *, collection_name: str) -> None: ...

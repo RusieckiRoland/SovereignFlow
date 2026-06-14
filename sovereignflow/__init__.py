@@ -1,4 +1,9 @@
-from .application import PipelineEngine, PipelineValidator, RagQueryService
+from .application import (
+    DocumentIngestionService,
+    PipelineEngine,
+    PipelineValidator,
+    RagQueryService,
+)
 from .domain import (
     Citation,
     ConfigurationError,
@@ -6,6 +11,11 @@ from .domain import (
     DocumentChunk,
     DomainNotFoundError,
     DomainProfile,
+    IngestionCommand,
+    IngestionError,
+    IngestionJob,
+    IngestionJobStatus,
+    IngestionResult,
     PipelineDefinition,
     PipelineDefinitionError,
     PipelineExecutionError,
@@ -30,8 +40,14 @@ __all__ = [
     "ConfigurationError",
     "DependencyUnavailableError",
     "DocumentChunk",
+    "DocumentIngestionService",
     "DomainNotFoundError",
     "DomainProfile",
+    "IngestionCommand",
+    "IngestionError",
+    "IngestionJob",
+    "IngestionJobStatus",
+    "IngestionResult",
     "PipelineDefinition",
     "PipelineDefinitionError",
     "PipelineEngine",
@@ -54,4 +70,4 @@ __all__ = [
     "ValidationError",
 ]
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"

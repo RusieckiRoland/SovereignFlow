@@ -10,10 +10,11 @@ SovereignFlow owns reusable RAG mechanics:
 - evidence assembly,
 - citations,
 - security metadata,
-- API contracts.
+- API contracts,
 - versioned YAML pipeline definitions,
 - action contracts and deterministic routing,
-- durable execution history and step audit.
+- durable execution history and step audit,
+- versioned, idempotent document ingestion.
 
 Domain projects own source semantics and business rules.
 
@@ -70,6 +71,23 @@ Actions may return a named routing decision. The engine only follows routes decl
 The adapter stores run identity, tenant boundary, pipeline checksum, completed steps, selected transitions, durations, final output metadata, and safe error details. Schema migrations are bundled with the package, serialized with a PostgreSQL advisory lock, and protected by SHA-256 checksums.
 
 The application records the run before executing the first action and records completion or failure explicitly. Audit failure is a request failure because silently losing execution evidence would violate the platform contract.
+
+## Document ingestion
+
+Source-specific parsing and chunking remain in domain projects. They submit neutral, immutable `IngestionCommand` objects through the application service.
+
+PostgreSQL is the ingestion source of truth. A single transaction stores:
+
+- source-version identity and metadata;
+- ordered document chunks;
+- an idempotency key and canonical payload hash;
+- an explicit indexing job.
+
+The application then requests batch embeddings and replaces the source in the configured Weaviate collection. Only after successful vector indexing does PostgreSQL advance the current source-version pointer. A failed or interrupted job remains durable and requires an explicit retry.
+
+PostgreSQL and Weaviate do not support one distributed transaction. SovereignFlow therefore uses an explicit job state machine and idempotent source replacement rather than pretending that cross-database atomicity exists.
+
+Weaviate collection schemas are created or verified during startup. Any property or type drift is a startup failure; there is no best-effort schema fallback.
 
 ## Security rule
 

@@ -47,3 +47,13 @@ class PipelineDefinitionError(ConfigurationError):
 class PipelineExecutionError(SovereignFlowError):
     code = "pipeline_execution_error"
     http_status = 500
+
+
+class ConflictError(SovereignFlowError):
+    code = "conflict"
+    http_status = 409
+
+
+class IngestionError(SovereignFlowError):
+    code = "ingestion_error"
+    http_status = 500

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-from importlib.resources import files
 from typing import Any
 
 from sovereignflow.domain import (
@@ -9,6 +7,8 @@ from sovereignflow.domain import (
     PipelineRun,
     PipelineStepAudit,
 )
+
+from .postgres_support import psycopg_module
 
 
 class PostgreSQLExecutionAudit:
@@ -22,61 +22,6 @@ class PostgreSQLExecutionAudit:
 
     def check(self) -> None:
         self._execute_scalar("SELECT 1")
-
-    def migrate(self) -> None:
-        migration_root = files("sovereignflow.infrastructure.migrations")
-        migrations = sorted(
-            (item for item in migration_root.iterdir() if item.name.endswith(".sql")),
-            key=lambda item: item.name,
-        )
-        try:
-            psycopg = _psycopg()
-            with psycopg.connect(
-                self._connection_url,
-                connect_timeout=self._timeout_seconds,
-            ) as connection:
-                with connection.cursor() as cursor:
-                    cursor.execute("SELECT pg_advisory_xact_lock(%s)", (821347129,))
-                    cursor.execute(
-                        """
-                        CREATE TABLE IF NOT EXISTS public.sovereignflow_schema_migrations (
-                            version TEXT PRIMARY KEY,
-                            checksum TEXT NOT NULL,
-                            applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                        )
-                        """
-                    )
-                    for migration in migrations:
-                        sql = migration.read_text(encoding="utf-8")
-                        checksum = hashlib.sha256(sql.encode("utf-8")).hexdigest()
-                        cursor.execute(
-                            """
-                            SELECT checksum
-                            FROM public.sovereignflow_schema_migrations
-                            WHERE version = %s
-                            """,
-                            (migration.name,),
-                        )
-                        existing = cursor.fetchone()
-                        if existing is not None:
-                            if existing[0] != checksum:
-                                raise DependencyUnavailableError(
-                                    f"Migration checksum mismatch: {migration.name}"
-                                )
-                            continue
-                        cursor.execute(sql)
-                        cursor.execute(
-                            """
-                            INSERT INTO public.sovereignflow_schema_migrations (version, checksum)
-                            VALUES (%s, %s)
-                            """,
-                            (migration.name, checksum),
-                        )
-                connection.commit()
-        except DependencyUnavailableError:
-            raise
-        except Exception as exc:
-            raise DependencyUnavailableError("PostgreSQL migration failed") from exc
 
     def start(self, run: PipelineRun) -> None:
         self._execute(
@@ -143,7 +88,7 @@ class PostgreSQLExecutionAudit:
 
     def fetch(self, request_id: str, *, tenant_id: str) -> dict[str, Any] | None:
         try:
-            psycopg = _psycopg()
+            psycopg = psycopg_module()
             with (
                 psycopg.connect(
                     self._connection_url,
@@ -239,7 +184,7 @@ class PostgreSQLExecutionAudit:
 
     def _execute(self, statement: str, parameters: tuple[Any, ...]) -> None:
         try:
-            psycopg = _psycopg()
+            psycopg = psycopg_module()
             with psycopg.connect(
                 self._connection_url,
                 connect_timeout=self._timeout_seconds,
@@ -252,7 +197,7 @@ class PostgreSQLExecutionAudit:
 
     def _execute_scalar(self, statement: str) -> Any:
         try:
-            psycopg = _psycopg()
+            psycopg = psycopg_module()
             with (
                 psycopg.connect(
                     self._connection_url,
@@ -265,11 +210,3 @@ class PostgreSQLExecutionAudit:
         except Exception as exc:
             raise DependencyUnavailableError("PostgreSQL audit health check failed") from exc
         return row[0] if row else None
-
-
-def _psycopg():
-    try:
-        import psycopg
-    except ImportError as exc:
-        raise DependencyUnavailableError("psycopg is not installed") from exc
-    return psycopg

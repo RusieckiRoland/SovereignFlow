@@ -5,10 +5,17 @@ from .http_gateways import (
     OpenAIEmbeddingGateway,
     OpenAIModelGateway,
 )
+from .ingestion import PostgreSQLIngestionRepository
+from .migration_runner import PostgreSQLMigrationRunner
 from .pipelines import YamlPipelineRepository
 from .postgres import PostgreSQLHealthProbe
 from .prompts import FilePromptRepository
-from .weaviate import WeaviateHealthProbe, WeaviateRetrievalAdapter
+from .weaviate import (
+    WeaviateCollectionMigrator,
+    WeaviateHealthProbe,
+    WeaviateRetrievalAdapter,
+    WeaviateVectorIndex,
+)
 
 __all__ = [
     "EmbeddingEndpoint",
@@ -18,7 +25,11 @@ __all__ = [
     "OpenAIModelGateway",
     "PostgreSQLExecutionAudit",
     "PostgreSQLHealthProbe",
+    "PostgreSQLIngestionRepository",
+    "PostgreSQLMigrationRunner",
+    "WeaviateCollectionMigrator",
     "WeaviateHealthProbe",
     "WeaviateRetrievalAdapter",
+    "WeaviateVectorIndex",
     "YamlPipelineRepository",
 ]

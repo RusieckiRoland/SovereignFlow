@@ -51,6 +51,9 @@ class Healthy:
     def embed_query(self, text: str):
         return (0.1,)
 
+    def embed_documents(self, texts):
+        return tuple((0.1,) for _ in texts)
+
 
 class Retrieval(Healthy):
     def search(self, request):
@@ -76,18 +79,42 @@ class Pipelines:
 class Audit(StubAudit):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__()
-        self.migrated = 0
         self.checked = 0
 
     @property
     def name(self) -> str:
         return "execution_audit"
 
+    def check(self) -> None:
+        self.checked += 1
+
+
+class MigrationRunner:
+    def __init__(self, *args, **kwargs) -> None:
+        self.migrated = 0
+
     def migrate(self) -> None:
         self.migrated += 1
 
+
+class IngestionRepository(Healthy):
+    name = "ingestion_repository"
+
     def check(self) -> None:
         self.checked += 1
+
+
+class CollectionMigrator:
+    def __init__(self, client) -> None:
+        self.client = client
+
+    def ensure(self, collection_name: str) -> None:
+        return None
+
+
+class VectorIndex:
+    def __init__(self, **kwargs) -> None:
+        self.kwargs = kwargs
 
 
 def settings(tmp_path: Path) -> SovereignFlowSettings:
@@ -148,6 +175,22 @@ def test_bootstrap_builds_and_validates_complete_application(monkeypatch, tmp_pa
         Audit,
     )
     monkeypatch.setattr(
+        "sovereignflow.bootstrap.application.PostgreSQLMigrationRunner",
+        MigrationRunner,
+    )
+    monkeypatch.setattr(
+        "sovereignflow.bootstrap.application.PostgreSQLIngestionRepository",
+        IngestionRepository,
+    )
+    monkeypatch.setattr(
+        "sovereignflow.bootstrap.application.WeaviateCollectionMigrator",
+        CollectionMigrator,
+    )
+    monkeypatch.setattr(
+        "sovereignflow.bootstrap.application.WeaviateVectorIndex",
+        VectorIndex,
+    )
+    monkeypatch.setattr(
         "sovereignflow.bootstrap.application.WeaviateRetrievalAdapter",
         Retrieval,
     )
@@ -163,6 +206,7 @@ def test_bootstrap_builds_and_validates_complete_application(monkeypatch, tmp_pa
     application = bootstrap(settings(tmp_path))
 
     assert application.app.test_client().get("/live").status_code == 200
+    assert set(application.ingestion_services) == {"general"}
     application.close()
     assert client.closed == 1
 
@@ -197,6 +241,22 @@ def test_bootstrap_closes_client_when_construction_fails(monkeypatch, tmp_path) 
     monkeypatch.setattr(
         "sovereignflow.bootstrap.application.PostgreSQLExecutionAudit",
         Audit,
+    )
+    monkeypatch.setattr(
+        "sovereignflow.bootstrap.application.PostgreSQLMigrationRunner",
+        MigrationRunner,
+    )
+    monkeypatch.setattr(
+        "sovereignflow.bootstrap.application.PostgreSQLIngestionRepository",
+        IngestionRepository,
+    )
+    monkeypatch.setattr(
+        "sovereignflow.bootstrap.application.WeaviateCollectionMigrator",
+        CollectionMigrator,
+    )
+    monkeypatch.setattr(
+        "sovereignflow.bootstrap.application.WeaviateVectorIndex",
+        VectorIndex,
     )
     monkeypatch.setattr(
         "sovereignflow.bootstrap.application.WeaviateRetrievalAdapter",

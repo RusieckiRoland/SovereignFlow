@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import builtins
-import hashlib
-from importlib.resources import files
 from types import SimpleNamespace
 
 import pytest
@@ -106,7 +103,7 @@ def test_audit_write_methods_use_parameterized_statements(monkeypatch) -> None:
 def test_audit_health_execute_and_failures(monkeypatch) -> None:
     cursor = Cursor(one=[(1,), None])
     connection = Connection(cursor)
-    monkeypatch.setattr(audit_module, "_psycopg", lambda: module_for(connection))
+    monkeypatch.setattr(audit_module, "psycopg_module", lambda: module_for(connection))
     repository = audit()
 
     assert repository.name == "execution_audit"
@@ -117,7 +114,7 @@ def test_audit_health_execute_and_failures(monkeypatch) -> None:
 
     monkeypatch.setattr(
         audit_module,
-        "_psycopg",
+        "psycopg_module",
         lambda: module_for(Connection(Cursor(error=RuntimeError("down")))),
     )
     with pytest.raises(DependencyUnavailableError, match="health"):
@@ -147,7 +144,7 @@ def test_audit_fetch_returns_tenant_scoped_run_and_steps(monkeypatch) -> None:
     )
     step_row = (1, "step", "action", "1.0", 5, None, "completed")
     cursor = Cursor(one=[run_row], all_rows=[[step_row]])
-    monkeypatch.setattr(audit_module, "_psycopg", lambda: module_for(Connection(cursor)))
+    monkeypatch.setattr(audit_module, "psycopg_module", lambda: module_for(Connection(cursor)))
 
     result = audit().fetch("request", tenant_id="tenant")
 
@@ -160,75 +157,15 @@ def test_audit_fetch_returns_tenant_scoped_run_and_steps(monkeypatch) -> None:
 def test_audit_fetch_handles_missing_and_database_failure(monkeypatch) -> None:
     monkeypatch.setattr(
         audit_module,
-        "_psycopg",
+        "psycopg_module",
         lambda: module_for(Connection(Cursor(one=[None]))),
     )
     assert audit().fetch("missing", tenant_id="tenant") is None
 
     monkeypatch.setattr(
         audit_module,
-        "_psycopg",
+        "psycopg_module",
         lambda: module_for(Connection(Cursor(error=RuntimeError("down")))),
     )
     with pytest.raises(DependencyUnavailableError, match="read"):
         audit().fetch("request", tenant_id="tenant")
-
-
-def test_audit_migrations_are_applied_verified_and_protected(monkeypatch) -> None:
-    migration = next(
-        item
-        for item in files("sovereignflow.infrastructure.migrations").iterdir()
-        if item.name.endswith(".sql")
-    )
-    checksum = hashlib.sha256(migration.read_text(encoding="utf-8").encode()).hexdigest()
-
-    cursor = Cursor(one=[None])
-    connection = Connection(cursor)
-    monkeypatch.setattr(audit_module, "_psycopg", lambda: module_for(connection))
-    audit().migrate()
-    assert connection.commits == 1
-    assert any("CREATE SCHEMA" in statement for statement, _ in cursor.executed)
-
-    cursor = Cursor(one=[(checksum,)])
-    monkeypatch.setattr(
-        audit_module,
-        "_psycopg",
-        lambda: module_for(Connection(cursor)),
-    )
-    audit().migrate()
-    assert not any("CREATE SCHEMA" in statement for statement, _ in cursor.executed)
-
-    cursor = Cursor(one=[("wrong",)])
-    monkeypatch.setattr(
-        audit_module,
-        "_psycopg",
-        lambda: module_for(Connection(cursor)),
-    )
-    with pytest.raises(DependencyUnavailableError, match="checksum"):
-        audit().migrate()
-
-    monkeypatch.setattr(
-        audit_module,
-        "_psycopg",
-        lambda: module_for(Connection(Cursor(error=RuntimeError("down")))),
-    )
-    with pytest.raises(DependencyUnavailableError, match="migration failed"):
-        audit().migrate()
-
-
-def test_psycopg_import_failure_is_explicit(monkeypatch) -> None:
-    real_import = builtins.__import__
-
-    def blocked(name, *args, **kwargs):
-        if name == "psycopg":
-            raise ImportError
-        return real_import(name, *args, **kwargs)
-
-    monkeypatch.delitem(__import__("sys").modules, "psycopg", raising=False)
-    monkeypatch.setattr(builtins, "__import__", blocked)
-    with pytest.raises(DependencyUnavailableError, match="not installed"):
-        audit_module._psycopg()
-
-
-def test_psycopg_import_succeeds() -> None:
-    assert audit_module._psycopg().__name__ == "psycopg"

@@ -7,6 +7,7 @@ from typing import Any
 from flask import Flask
 
 from sovereignflow.application import (
+    DocumentIngestionService,
     HealthProbe,
     PipelineEngine,
     PipelineValidator,
@@ -22,8 +23,12 @@ from sovereignflow.infrastructure import (
     OpenAIModelGateway,
     PostgreSQLExecutionAudit,
     PostgreSQLHealthProbe,
+    PostgreSQLIngestionRepository,
+    PostgreSQLMigrationRunner,
+    WeaviateCollectionMigrator,
     WeaviateHealthProbe,
     WeaviateRetrievalAdapter,
+    WeaviateVectorIndex,
     YamlPipelineRepository,
 )
 from sovereignflow.interfaces import QueryDispatcher, create_app
@@ -44,6 +49,7 @@ class _GatewayHealthProbe:
 class BootstrappedApplication:
     app: Flask
     weaviate_client: Any
+    ingestion_services: dict[str, DocumentIngestionService]
 
     def close(self) -> None:
         self.weaviate_client.close()
@@ -72,21 +78,32 @@ def bootstrap(settings: SovereignFlowSettings) -> BootstrappedApplication:
     )
     prompts = FilePromptRepository(settings.prompts_root)
     pipelines = YamlPipelineRepository(settings.pipelines_root)
+    PostgreSQLMigrationRunner(
+        settings.postgresql.connection_url,
+        timeout_seconds=settings.postgresql.timeout_seconds,
+    ).migrate()
     audit = PostgreSQLExecutionAudit(
         settings.postgresql.connection_url,
         timeout_seconds=settings.postgresql.timeout_seconds,
     )
-    audit.migrate()
+    ingestion_repository = PostgreSQLIngestionRepository(
+        settings.postgresql.connection_url,
+        timeout_seconds=settings.postgresql.timeout_seconds,
+    )
     registry = default_action_registry()
     validator = PipelineValidator(registry)
     engine = PipelineEngine(registry=registry, audit=audit)
     client = _connect_weaviate(settings)
     try:
         services: dict[str, RagQueryService] = {}
+        ingestion_services: dict[str, DocumentIngestionService] = {}
         retrieval_probes: list[HealthProbe] = []
+        collection_migrator = WeaviateCollectionMigrator(client)
+        vector_index = WeaviateVectorIndex(client=client, embeddings=embeddings)
         for domain in settings.domains:
             pipeline = pipelines.load(domain.pipeline_name)
             validator.validate(pipeline)
+            collection_migrator.ensure(domain.collection)
             retrieval = WeaviateRetrievalAdapter(
                 client=client,
                 collection_name=domain.collection,
@@ -102,6 +119,11 @@ def bootstrap(settings: SovereignFlowSettings) -> BootstrappedApplication:
                 pipeline=pipeline,
                 engine=engine,
             )
+            ingestion_services[domain.name] = DocumentIngestionService(
+                domain=domain,
+                repository=ingestion_repository,
+                vector_index=vector_index,
+            )
             retrieval_probes.append(
                 _GatewayHealthProbe(
                     name=f"retrieval:{domain.name}",
@@ -115,6 +137,7 @@ def bootstrap(settings: SovereignFlowSettings) -> BootstrappedApplication:
                 timeout_seconds=settings.postgresql.timeout_seconds,
             ),
             audit,
+            ingestion_repository,
             WeaviateHealthProbe(client),
             _GatewayHealthProbe(name="embeddings", gateway=embeddings),
             _GatewayHealthProbe(name="model", gateway=model),
@@ -125,6 +148,7 @@ def bootstrap(settings: SovereignFlowSettings) -> BootstrappedApplication:
         application = BootstrappedApplication(
             app=create_app(QueryDispatcher(services), probes),
             weaviate_client=client,
+            ingestion_services=ingestion_services,
         )
         atexit.register(application.close)
         return application

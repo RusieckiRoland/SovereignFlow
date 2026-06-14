@@ -34,7 +34,7 @@ def test_gateways_use_real_openai_compatible_http_protocol(http_server) -> None:
     )
     http_server.responses[("POST", "/v1/embeddings")] = (
         200,
-        {"data": [{"embedding": [1, 2.5]}]},
+        {"data": [{"index": 0, "embedding": [1, 2.5]}]},
         "application/json",
     )
     model = OpenAIModelGateway(
@@ -55,7 +55,7 @@ def test_gateways_use_real_openai_compatible_http_protocol(http_server) -> None:
     posts = [item for item in http_server.requests if item[0] == "POST"]
     assert posts[0][2]["Authorization"] == "Bearer secret"
     assert posts[0][3]["model"] == "chat"
-    assert posts[1][3] == {"model": "vectors", "input": "query"}
+    assert posts[1][3] == {"model": "vectors", "input": ["query"]}
 
 
 def test_endpoints_validate_scope_and_timeout() -> None:
@@ -105,6 +105,14 @@ class TimeoutClient:
         raise TimeoutError
 
 
+class EmbeddingClient:
+    def __init__(self, response) -> None:
+        self.response = response
+
+    def post(self, **kwargs):
+        return self.response
+
+
 @pytest.mark.integration
 @pytest.mark.parametrize(
     ("path", "body", "method", "error"),
@@ -129,13 +137,13 @@ class TimeoutClient:
         ),
         (
             "/v1/embeddings",
-            {"data": [{"embedding": []}]},
+            {"data": [{"index": 0, "embedding": []}]},
             "embedding",
             "no vector",
         ),
         (
             "/v1/embeddings",
-            {"data": [{"embedding": ["bad"]}]},
+            {"data": [{"index": 0, "embedding": ["bad"]}]},
             "embedding",
             "must contain numbers",
         ),
@@ -157,3 +165,49 @@ def test_gateways_reject_invalid_provider_schemas(
         gateway = OpenAIEmbeddingGateway(EmbeddingEndpoint("e", base_url(http_server), "e", "", 1))
         with pytest.raises(ProviderProtocolError, match=error):
             gateway.embed_query("q")
+
+
+@pytest.mark.parametrize("texts", [(), ("",), ("ok", " ")])
+def test_embedding_gateway_rejects_empty_inputs(texts) -> None:
+    gateway = OpenAIEmbeddingGateway(
+        EmbeddingEndpoint("e", "http://embed/v1", "e", "", 1),
+        http_client=EmbeddingClient({}),
+    )
+
+    with pytest.raises(ValidationError, match="non-empty"):
+        gateway.embed_documents(texts)
+
+
+@pytest.mark.parametrize(
+    ("response", "error"),
+    [
+        ({"data": [{"index": 1, "embedding": [1.0]}]}, "invalid schema"),
+        (
+            {
+                "data": [
+                    {"index": 0, "embedding": [1.0]},
+                    {"index": 1, "embedding": [2.0]},
+                ]
+            },
+            "count",
+        ),
+        (
+            {
+                "data": [
+                    {"index": 0, "embedding": [1.0]},
+                    {"index": 1, "embedding": [2.0, 3.0]},
+                ]
+            },
+            "inconsistent",
+        ),
+    ],
+)
+def test_embedding_gateway_validates_batch_alignment(response, error) -> None:
+    gateway = OpenAIEmbeddingGateway(
+        EmbeddingEndpoint("e", "http://embed/v1", "e", "", 1),
+        http_client=EmbeddingClient(response),
+    )
+    texts = ("one",) if error != "inconsistent" else ("one", "two")
+
+    with pytest.raises(ProviderProtocolError, match=error):
+        gateway.embed_documents(texts)
