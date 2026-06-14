@@ -91,6 +91,15 @@ The application then requests batch embeddings and replaces the source in the co
 PostgreSQL and Weaviate do not support one distributed transaction. SovereignFlow therefore uses an explicit job state machine and idempotent source replacement rather than pretending that cross-database atomicity exists.
 
 Weaviate collection schemas are created or verified during startup. Any property or type drift is a startup failure; there is no best-effort schema fallback.
+Identifier, tenant, domain, version, URI, and ACL properties use field tokenization so
+exact security and lifecycle filters cannot broaden through word tokenization.
+
+Bulk dataset import is a separate application use case. A JSONL infrastructure
+adapter stages selected records in a local SQLite workspace, then emits neutral
+ingestion commands. The application imports source versions first, publishes
+relationships for active versions second, and applies explicit deletions last.
+Import runs and safe failures are durable in PostgreSQL and observable through the
+operational CLI.
 
 ## Graph relationships
 

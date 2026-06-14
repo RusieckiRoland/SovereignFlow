@@ -476,6 +476,115 @@ class IngestionJobStatus(StrEnum):
     FAILED = "failed"
 
 
+class DatasetImportStatus(StrEnum):
+    STAGING = "staging"
+    RELATING = "relating"
+    DELETING = "deleting"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+@dataclass(frozen=True)
+class DatasetImportRequest:
+    import_id: str
+    domain: str
+    tenant_id: str
+    dataset_hash: str
+    source_count: int
+    chunk_count: int
+    relationship_count: int
+    deletion_count: int
+
+    def __post_init__(self) -> None:
+        for field_name in ("import_id", "domain", "tenant_id", "dataset_hash"):
+            object.__setattr__(
+                self,
+                field_name,
+                _required(getattr(self, field_name), f"DatasetImportRequest.{field_name}"),
+            )
+        for field_name in (
+            "source_count",
+            "chunk_count",
+            "relationship_count",
+            "deletion_count",
+        ):
+            if getattr(self, field_name) < 0:
+                raise ValidationError(f"DatasetImportRequest.{field_name} cannot be negative")
+        if self.source_count < 1 or self.chunk_count < 1:
+            raise ValidationError("Dataset import must contain at least one source and chunk")
+
+
+@dataclass(frozen=True)
+class DatasetImportRun:
+    import_id: str
+    domain: str
+    tenant_id: str
+    dataset_hash: str
+    status: DatasetImportStatus
+    source_count: int
+    chunk_count: int
+    relationship_count: int
+    deletion_count: int
+    indexed_sources: int = 0
+    published_relationships: int = 0
+    deleted_sources: int = 0
+    error_code: str | None = None
+    error_message: str | None = None
+
+    def __post_init__(self) -> None:
+        DatasetImportRequest(
+            import_id=self.import_id,
+            domain=self.domain,
+            tenant_id=self.tenant_id,
+            dataset_hash=self.dataset_hash,
+            source_count=self.source_count,
+            chunk_count=self.chunk_count,
+            relationship_count=self.relationship_count,
+            deletion_count=self.deletion_count,
+        )
+        for field_name in (
+            "indexed_sources",
+            "published_relationships",
+            "deleted_sources",
+        ):
+            if getattr(self, field_name) < 0:
+                raise ValidationError(f"DatasetImportRun.{field_name} cannot be negative")
+
+
+@dataclass(frozen=True)
+class DatasetConsistencyReport:
+    domain: str
+    tenant_id: str
+    active_sources: int
+    active_chunks: int
+    indexed_chunks: int
+    active_relationships: int
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "domain",
+            _required(self.domain, "DatasetConsistencyReport.domain"),
+        )
+        object.__setattr__(
+            self,
+            "tenant_id",
+            _required(self.tenant_id, "DatasetConsistencyReport.tenant_id"),
+        )
+        for field_name in (
+            "active_sources",
+            "active_chunks",
+            "indexed_chunks",
+            "active_relationships",
+        ):
+            if getattr(self, field_name) < 0:
+                raise ValidationError(f"DatasetConsistencyReport.{field_name} cannot be negative")
+
+    @property
+    def consistent(self) -> bool:
+        return self.active_chunks == self.indexed_chunks
+
+
 @dataclass(frozen=True)
 class IngestionCommand:
     idempotency_key: str

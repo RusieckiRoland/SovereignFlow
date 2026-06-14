@@ -15,16 +15,16 @@ from sovereignflow.domain import (
 )
 
 _COLLECTION_PROPERTIES = {
-    "chunk_id": "text",
-    "domain": "text",
-    "tenant_id": "text",
-    "source_id": "text",
-    "source_version": "text",
-    "source_uri": "text",
-    "text": "text",
-    "metadata_json": "text",
-    "acl_labels": "text[]",
-    "classification_level": "int",
+    "chunk_id": ("text", "field"),
+    "domain": ("text", "field"),
+    "tenant_id": ("text", "field"),
+    "source_id": ("text", "field"),
+    "source_version": ("text", "field"),
+    "source_uri": ("text", "field"),
+    "text": ("text", "word"),
+    "metadata_json": ("text", "word"),
+    "acl_labels": ("text[]", "field"),
+    "classification_level": ("int", None),
 }
 
 
@@ -49,7 +49,7 @@ class WeaviateCollectionMigrator:
 
     def ensure(self, collection_name: str) -> None:
         try:
-            from weaviate.classes.config import Configure, DataType, Property
+            from weaviate.classes.config import Configure, DataType, Property, Tokenization
         except ImportError as exc:
             raise DependencyUnavailableError("weaviate-client is not installed") from exc
         try:
@@ -63,14 +63,28 @@ class WeaviateCollectionMigrator:
                     name=collection_name,
                     vector_config=Configure.Vectors.self_provided(),
                     properties=[
-                        Property(name=name, data_type=data_types[data_type])
-                        for name, data_type in _COLLECTION_PROPERTIES.items()
+                        Property(
+                            name=name,
+                            data_type=data_types[data_type],
+                            **(
+                                {"tokenization": Tokenization(tokenization)}
+                                if tokenization is not None
+                                else {}
+                            ),
+                        )
+                        for name, (data_type, tokenization) in _COLLECTION_PROPERTIES.items()
                     ],
                 )
                 return
             collection = self._client.collections.use(collection_name)
             config = collection.config.get()
-            actual = {item.name: _data_type_name(item.data_type) for item in config.properties}
+            actual = {
+                item.name: (
+                    _data_type_name(item.data_type),
+                    _tokenization_name(getattr(item, "tokenization", None)),
+                )
+                for item in config.properties
+            }
         except Exception as exc:
             raise DependencyUnavailableError("Weaviate collection migration failed") from exc
         if actual != _COLLECTION_PROPERTIES:
@@ -98,6 +112,14 @@ class WeaviateVectorIndex:
             raise ProviderProtocolError("Embedding count does not match ingestion chunks")
         collection = self._client.collections.use(collection_name)
         try:
+            source_filter = Filter.all_of(
+                [
+                    Filter.by_property("domain").equal(command.domain),
+                    Filter.by_property("tenant_id").equal(command.tenant_id),
+                    Filter.by_property("source_id").equal(command.source_id),
+                ]
+            )
+            collection.data.delete_many(source_filter)
             for chunk, vector in zip(command.chunks, vectors, strict=True):
                 object_uuid = str(
                     generate_uuid5(
@@ -121,31 +143,59 @@ class WeaviateVectorIndex:
                     "acl_labels": list(chunk.acl_labels),
                     "classification_level": chunk.classification_level,
                 }
-                if collection.data.exists(object_uuid):
-                    collection.data.replace(
-                        uuid=object_uuid,
-                        properties=properties,
-                        vector=list(vector),
-                    )
-                else:
-                    collection.data.insert(
-                        uuid=object_uuid,
-                        properties=properties,
-                        vector=list(vector),
-                    )
-            stale_source_filter = Filter.all_of(
-                [
-                    Filter.by_property("domain").equal(command.domain),
-                    Filter.by_property("tenant_id").equal(command.tenant_id),
-                    Filter.by_property("source_id").equal(command.source_id),
-                    Filter.by_property("source_version").not_equal(command.source_version),
-                ]
-            )
-            collection.data.delete_many(stale_source_filter)
+                collection.data.insert(
+                    uuid=object_uuid,
+                    properties=properties,
+                    vector=list(vector),
+                )
         except (DependencyUnavailableError, ProviderProtocolError):
             raise
         except Exception as exc:
             raise DependencyUnavailableError("Weaviate source replacement failed") from exc
+
+    def delete_source(
+        self,
+        *,
+        collection_name: str,
+        domain: str,
+        tenant_id: str,
+        source_id: str,
+    ) -> None:
+        try:
+            from weaviate.classes.query import Filter
+        except ImportError as exc:
+            raise DependencyUnavailableError("weaviate-client is not installed") from exc
+        source_filter = Filter.all_of(
+            [
+                Filter.by_property("domain").equal(domain),
+                Filter.by_property("tenant_id").equal(tenant_id),
+                Filter.by_property("source_id").equal(source_id),
+            ]
+        )
+        try:
+            self._client.collections.use(collection_name).data.delete_many(source_filter)
+        except Exception as exc:
+            raise DependencyUnavailableError("Weaviate source deletion failed") from exc
+
+    def count(self, *, collection_name: str, domain: str, tenant_id: str) -> int:
+        try:
+            from weaviate.classes.query import Filter
+        except ImportError as exc:
+            raise DependencyUnavailableError("weaviate-client is not installed") from exc
+        query_filter = Filter.all_of(
+            [
+                Filter.by_property("domain").equal(domain),
+                Filter.by_property("tenant_id").equal(tenant_id),
+            ]
+        )
+        try:
+            result = self._client.collections.use(collection_name).aggregate.over_all(
+                filters=query_filter,
+                total_count=True,
+            )
+            return int(result.total_count)
+        except Exception as exc:
+            raise DependencyUnavailableError("Weaviate consistency count failed") from exc
 
 
 class WeaviateRetrievalAdapter:
@@ -271,3 +321,9 @@ def _data_type_name(value: Any) -> str:
         "integer": "int",
     }
     return aliases.get(normalized, normalized)
+
+
+def _tokenization_name(value: Any) -> str | None:
+    if value is None:
+        return None
+    return str(getattr(value, "value", value)).lower()

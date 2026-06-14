@@ -22,6 +22,7 @@ from sovereignflow.infrastructure.weaviate import (
     WeaviateRetrievalAdapter,
     WeaviateVectorIndex,
     _data_type_name,
+    _tokenization_name,
 )
 
 
@@ -366,18 +367,18 @@ def test_collection_migrator_creates_and_verifies_exact_schema() -> None:
     assert len(collections.created[0]["properties"]) == 10
 
     properties = [
-        SimpleNamespace(name=name, data_type=[data_type])
-        for name, data_type in {
-            "chunk_id": "text",
-            "domain": "text",
-            "tenant_id": "text",
-            "source_id": "text",
-            "source_version": "text",
-            "source_uri": "text",
-            "text": "text",
-            "metadata_json": "text",
-            "acl_labels": "text_array",
-            "classification_level": "integer",
+        SimpleNamespace(name=name, data_type=[data_type], tokenization=tokenization)
+        for name, (data_type, tokenization) in {
+            "chunk_id": ("text", "field"),
+            "domain": ("text", "field"),
+            "tenant_id": ("text", "field"),
+            "source_id": ("text", "field"),
+            "source_version": ("text", "field"),
+            "source_uri": ("text", "field"),
+            "text": ("text", "word"),
+            "metadata_json": ("text", "word"),
+            "acl_labels": ("text_array", "field"),
+            "classification_level": ("integer", None),
         }.items()
     ]
     configured = SimpleNamespace(
@@ -421,12 +422,9 @@ def test_collection_migrator_reports_missing_sdk(monkeypatch) -> None:
         WeaviateCollectionMigrator(SimpleNamespace()).ensure("General")
 
 
-def test_vector_index_inserts_replaces_and_removes_stale_source_versions() -> None:
+def test_vector_index_replaces_a_source_as_one_idempotent_set() -> None:
     job = ingestion_job()
-    from weaviate.util import generate_uuid5
-
-    existing_uuid = str(generate_uuid5("tenant-a:general:source-1:chunk-1"))
-    data = CollectionData(existing=(existing_uuid,))
+    data = CollectionData()
     collection = SimpleNamespace(data=data)
     client = SimpleNamespace(collections=IndexCollections(collection))
 
@@ -435,8 +433,8 @@ def test_vector_index_inserts_replaces_and_removes_stale_source_versions() -> No
         collection_name="General",
     )
 
-    assert len(data.replaced) == 1
-    assert len(data.inserted) == 1
+    assert len(data.replaced) == 0
+    assert len(data.inserted) == 2
     assert data.inserted[0]["properties"]["source_version"] == "v2"
     assert len(data.delete_filters) == 1
 
@@ -453,9 +451,7 @@ def test_vector_index_validates_embedding_count_and_maps_failures() -> None:
         ).replace_source(ingestion_job(), collection_name="General")
 
     collection = SimpleNamespace(
-        data=SimpleNamespace(
-            exists=lambda object_uuid: (_ for _ in ()).throw(RuntimeError("down"))
-        ),
+        data=SimpleNamespace(delete_many=lambda value: (_ for _ in ()).throw(RuntimeError("down"))),
         query=IndexQuery([[]]),
     )
     with pytest.raises(DependencyUnavailableError, match="replacement failed"):
@@ -466,7 +462,7 @@ def test_vector_index_validates_embedding_count_and_maps_failures() -> None:
 
     unavailable = SimpleNamespace(
         data=SimpleNamespace(
-            exists=lambda object_uuid: (_ for _ in ()).throw(
+            delete_many=lambda value: (_ for _ in ()).throw(
                 DependencyUnavailableError("unavailable")
             )
         ),
@@ -503,6 +499,72 @@ def test_vector_index_reports_missing_sdk(monkeypatch) -> None:
             client=SimpleNamespace(),
             embeddings=Embeddings(),
         ).replace_source(ingestion_job(), collection_name="General")
+    index = WeaviateVectorIndex(client=SimpleNamespace(), embeddings=Embeddings())
+    with pytest.raises(DependencyUnavailableError, match="not installed"):
+        index.delete_source(
+            collection_name="General",
+            domain="general",
+            tenant_id="tenant-a",
+            source_id="source-1",
+        )
+    with pytest.raises(DependencyUnavailableError, match="not installed"):
+        index.count(
+            collection_name="General",
+            domain="general",
+            tenant_id="tenant-a",
+        )
+
+
+def test_vector_index_deletes_and_counts_selected_boundary() -> None:
+    data = CollectionData()
+    aggregate = SimpleNamespace(over_all=lambda **kwargs: SimpleNamespace(total_count=7))
+    collection = SimpleNamespace(data=data, aggregate=aggregate)
+    index = WeaviateVectorIndex(
+        client=SimpleNamespace(collections=IndexCollections(collection)),
+        embeddings=Embeddings(),
+    )
+
+    index.delete_source(
+        collection_name="General",
+        domain="general",
+        tenant_id="tenant-a",
+        source_id="source-1",
+    )
+    count = index.count(
+        collection_name="General",
+        domain="general",
+        tenant_id="tenant-a",
+    )
+
+    assert len(data.delete_filters) == 1
+    assert count == 7
+
+
+def test_vector_index_maps_delete_and_count_failures() -> None:
+    collection = SimpleNamespace(
+        data=SimpleNamespace(delete_many=lambda value: (_ for _ in ()).throw(RuntimeError("down"))),
+        aggregate=SimpleNamespace(
+            over_all=lambda **kwargs: (_ for _ in ()).throw(RuntimeError("down"))
+        ),
+    )
+    index = WeaviateVectorIndex(
+        client=SimpleNamespace(collections=IndexCollections(collection)),
+        embeddings=Embeddings(),
+    )
+
+    with pytest.raises(DependencyUnavailableError, match="deletion failed"):
+        index.delete_source(
+            collection_name="General",
+            domain="general",
+            tenant_id="tenant-a",
+            source_id="source-1",
+        )
+    with pytest.raises(DependencyUnavailableError, match="count failed"):
+        index.count(
+            collection_name="General",
+            domain="general",
+            tenant_id="tenant-a",
+        )
 
 
 def test_weaviate_data_type_normalization_is_strict() -> None:
@@ -510,3 +572,5 @@ def test_weaviate_data_type_normalization_is_strict() -> None:
     assert _data_type_name(["text", "int"]) == "invalid"
     assert _data_type_name(SimpleNamespace(value="TEXT_ARRAY")) == "text[]"
     assert _data_type_name("custom") == "custom"
+    assert _tokenization_name(SimpleNamespace(value="FIELD")) == "field"
+    assert _tokenization_name(None) is None

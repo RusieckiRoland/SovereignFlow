@@ -27,6 +27,7 @@ dev = [
 
 [project.scripts]
 sovereignflow = "sovereignflow.__main__:main"
+sovereignflow-import = "sovereignflow.import_cli:main"
 
 [tool.setuptools.packages.find]
 include = ["sovereignflow*"]

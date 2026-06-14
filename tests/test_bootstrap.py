@@ -22,8 +22,10 @@ from sovereignflow.bootstrap.config import (
     SovereignFlowSettings,
     WeaviateSettings,
 )
+from sovereignflow.bootstrap.import_application import bootstrap_import
 from sovereignflow.domain import (
     DependencyUnavailableError,
+    DomainNotFoundError,
     DomainProfile,
     GraphDirection,
     GraphTraversalProfile,
@@ -296,6 +298,78 @@ def test_gateway_health_probe_delegates() -> None:
 
     assert probe.name == "gateway"
     assert gateway.checked == 1
+
+
+def test_import_bootstrap_builds_neutral_import_service(monkeypatch, tmp_path) -> None:
+    client = Client()
+    monkeypatch.setattr(
+        "sovereignflow.bootstrap.import_application._connect_weaviate",
+        lambda value: client,
+    )
+    monkeypatch.setattr(
+        "sovereignflow.bootstrap.import_application.PostgreSQLMigrationRunner",
+        MigrationRunner,
+    )
+    monkeypatch.setattr(
+        "sovereignflow.bootstrap.import_application.PostgreSQLIngestionRepository",
+        IngestionRepository,
+    )
+    monkeypatch.setattr(
+        "sovereignflow.bootstrap.import_application.OpenAIEmbeddingGateway",
+        Healthy,
+    )
+    monkeypatch.setattr(
+        "sovereignflow.bootstrap.import_application.WeaviateCollectionMigrator",
+        CollectionMigrator,
+    )
+    monkeypatch.setattr(
+        "sovereignflow.bootstrap.import_application.WeaviateVectorIndex",
+        VectorIndex,
+    )
+
+    application = bootstrap_import(settings(tmp_path), domain_name="general")
+
+    assert application.service is not None
+    application.close()
+    assert client.closed == 1
+
+
+def test_import_bootstrap_rejects_unknown_domain_and_closes_on_failure(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    with pytest.raises(DomainNotFoundError):
+        bootstrap_import(settings(tmp_path), domain_name="missing")
+
+    client = Client()
+    monkeypatch.setattr(
+        "sovereignflow.bootstrap.import_application._connect_weaviate",
+        lambda value: client,
+    )
+    monkeypatch.setattr(
+        "sovereignflow.bootstrap.import_application.PostgreSQLMigrationRunner",
+        MigrationRunner,
+    )
+    monkeypatch.setattr(
+        "sovereignflow.bootstrap.import_application.PostgreSQLIngestionRepository",
+        IngestionRepository,
+    )
+    monkeypatch.setattr(
+        "sovereignflow.bootstrap.import_application.OpenAIEmbeddingGateway",
+        Healthy,
+    )
+
+    class BrokenMigrator(CollectionMigrator):
+        def ensure(self, collection_name: str) -> None:
+            raise RuntimeError("broken")
+
+    monkeypatch.setattr(
+        "sovereignflow.bootstrap.import_application.WeaviateCollectionMigrator",
+        BrokenMigrator,
+    )
+    with pytest.raises(RuntimeError, match="broken"):
+        bootstrap_import(settings(tmp_path), domain_name="general")
+    assert client.closed == 1
 
 
 def test_connect_weaviate_uses_authenticated_custom_connection(

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from typing import Protocol
 
 from sovereignflow.domain import (
+    DatasetImportRequest,
+    DatasetImportRun,
+    DatasetImportStatus,
     GraphTraversalRequest,
     IngestionCommand,
     IngestionJob,
@@ -91,6 +94,55 @@ class IngestionRepositoryPort(Protocol):
 
     def mark_failed(self, job_id: str, *, error_code: str, error_message: str) -> None: ...
 
+    def replace_relationships(self, command: IngestionCommand) -> None: ...
+
+    def delete_source(
+        self,
+        *,
+        domain: str,
+        tenant_id: str,
+        source_id: str,
+    ) -> None: ...
+
+    def start_import(self, request: DatasetImportRequest) -> DatasetImportRun: ...
+
+    def load_import(self, import_id: str, *, tenant_id: str) -> DatasetImportRun: ...
+
+    def update_import(
+        self,
+        import_id: str,
+        *,
+        status: DatasetImportStatus,
+        indexed_sources: int,
+        published_relationships: int,
+        deleted_sources: int,
+    ) -> None: ...
+
+    def fail_import(self, import_id: str, *, error_code: str, error_message: str) -> None: ...
+
+    def consistency_counts(self, *, domain: str, tenant_id: str) -> dict[str, int]: ...
+
 
 class VectorIndexPort(Protocol):
     def replace_source(self, job: IngestionJob, *, collection_name: str) -> None: ...
+
+    def delete_source(
+        self,
+        *,
+        collection_name: str,
+        domain: str,
+        tenant_id: str,
+        source_id: str,
+    ) -> None: ...
+
+    def count(self, *, collection_name: str, domain: str, tenant_id: str) -> int: ...
+
+
+class DatasetReaderPort(Protocol):
+    def prepare(self, *, domain: str, tenant_id: str) -> DatasetImportRequest: ...
+
+    def source_commands(self) -> Iterable[IngestionCommand]: ...
+
+    def relationship_commands(self) -> Iterable[IngestionCommand]: ...
+
+    def deletions(self) -> Iterable[str]: ...

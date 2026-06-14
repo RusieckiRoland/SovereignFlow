@@ -14,6 +14,10 @@ from .errors import (
 )
 from .models import (
     Citation,
+    DatasetConsistencyReport,
+    DatasetImportRequest,
+    DatasetImportRun,
+    DatasetImportStatus,
     DocumentChunk,
     DomainProfile,
     GraphDirection,
@@ -41,6 +45,10 @@ from .models import (
 
 __all__ = [
     "Citation",
+    "DatasetConsistencyReport",
+    "DatasetImportRequest",
+    "DatasetImportRun",
+    "DatasetImportStatus",
     "AuthenticationError",
     "ConfigurationError",
     "ConflictError",

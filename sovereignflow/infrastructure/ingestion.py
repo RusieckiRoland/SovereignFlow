@@ -7,6 +7,9 @@ from typing import Any
 
 from sovereignflow.domain import (
     ConflictError,
+    DatasetImportRequest,
+    DatasetImportRun,
+    DatasetImportStatus,
     DependencyUnavailableError,
     DocumentChunk,
     GraphNodeRef,
@@ -288,6 +291,310 @@ class PostgreSQLIngestionRepository:
             parameters=(error_code[:100], error_message[:2000], job_id),
         )
 
+    def replace_relationships(self, command: IngestionCommand) -> None:
+        try:
+            psycopg = psycopg_module()
+            with psycopg.connect(
+                self._connection_url,
+                connect_timeout=self._timeout_seconds,
+            ) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                        (f"{command.tenant_id}:{command.domain}:{command.source_id}",),
+                    )
+                    cursor.execute(
+                        """
+                        SELECT current_version
+                        FROM ingestion.sources
+                        WHERE tenant_id = %s AND domain = %s AND source_id = %s
+                        """,
+                        (command.tenant_id, command.domain, command.source_id),
+                    )
+                    current = cursor.fetchone()
+                    if current is None or str(current[0]) != command.source_version:
+                        raise ConflictError(
+                            "Relationships can only be published for the active source version"
+                        )
+                    cursor.execute(
+                        """
+                        DELETE FROM graph.relationships
+                        WHERE tenant_id = %s AND domain = %s
+                          AND owner_source_id = %s AND owner_source_version = %s
+                        """,
+                        (
+                            command.tenant_id,
+                            command.domain,
+                            command.source_id,
+                            command.source_version,
+                        ),
+                    )
+                    for relationship in command.relationships:
+                        if not self._target_exists(cursor, command, relationship):
+                            raise ConflictError(
+                                "Relationship target does not exist in the current graph"
+                            )
+                        cursor.execute(
+                            """
+                            INSERT INTO graph.relationships (
+                                tenant_id, domain, owner_source_id, owner_source_version,
+                                from_source_id, from_chunk_id, to_source_id, to_chunk_id,
+                                relationship_type, metadata_json
+                            )
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+                            """,
+                            (
+                                command.tenant_id,
+                                command.domain,
+                                command.source_id,
+                                command.source_version,
+                                relationship.from_node.source_id,
+                                relationship.from_node.chunk_id,
+                                relationship.to_node.source_id,
+                                relationship.to_node.chunk_id,
+                                relationship.relationship_type,
+                                _json(relationship.metadata),
+                            ),
+                        )
+                connection.commit()
+        except (ConflictError, IngestionError):
+            raise
+        except Exception as exc:
+            raise DependencyUnavailableError("PostgreSQL relationship publication failed") from exc
+
+    def delete_source(
+        self,
+        *,
+        domain: str,
+        tenant_id: str,
+        source_id: str,
+    ) -> None:
+        try:
+            psycopg = psycopg_module()
+            with psycopg.connect(
+                self._connection_url,
+                connect_timeout=self._timeout_seconds,
+            ) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                        (f"{tenant_id}:{domain}:{source_id}",),
+                    )
+                    cursor.execute(
+                        """
+                        DELETE FROM graph.relationships
+                        WHERE tenant_id = %s AND domain = %s
+                          AND (from_source_id = %s OR to_source_id = %s)
+                        """,
+                        (tenant_id, domain, source_id, source_id),
+                    )
+                    cursor.execute(
+                        """
+                        DELETE FROM ingestion.sources
+                        WHERE tenant_id = %s AND domain = %s AND source_id = %s
+                        """,
+                        (tenant_id, domain, source_id),
+                    )
+                connection.commit()
+        except Exception as exc:
+            raise DependencyUnavailableError("PostgreSQL source deletion failed") from exc
+
+    def start_import(self, request: DatasetImportRequest) -> DatasetImportRun:
+        try:
+            psycopg = psycopg_module()
+            with psycopg.connect(
+                self._connection_url,
+                connect_timeout=self._timeout_seconds,
+            ) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        SELECT import_id, domain, tenant_id, dataset_hash, status,
+                               source_count, chunk_count, relationship_count, deletion_count,
+                               indexed_sources, published_relationships, deleted_sources,
+                               error_code, error_message
+                        FROM ingestion.import_runs
+                        WHERE import_id = %s
+                        """,
+                        (request.import_id,),
+                    )
+                    existing = cursor.fetchone()
+                    if existing is not None:
+                        run = _import_run(existing)
+                        if (
+                            run.domain != request.domain
+                            or run.tenant_id != request.tenant_id
+                            or run.dataset_hash != request.dataset_hash
+                        ):
+                            raise ConflictError(
+                                "Import identifier was already used for a different dataset"
+                            )
+                        return run
+                    cursor.execute(
+                        """
+                        INSERT INTO ingestion.import_runs (
+                            import_id, tenant_id, domain, dataset_hash, status,
+                            source_count, chunk_count, relationship_count, deletion_count
+                        )
+                        VALUES (%s, %s, %s, %s, 'staging', %s, %s, %s, %s)
+                        """,
+                        (
+                            request.import_id,
+                            request.tenant_id,
+                            request.domain,
+                            request.dataset_hash,
+                            request.source_count,
+                            request.chunk_count,
+                            request.relationship_count,
+                            request.deletion_count,
+                        ),
+                    )
+                connection.commit()
+        except (ConflictError, IngestionError):
+            raise
+        except Exception as exc:
+            raise DependencyUnavailableError("PostgreSQL import start failed") from exc
+        return DatasetImportRun(
+            import_id=request.import_id,
+            domain=request.domain,
+            tenant_id=request.tenant_id,
+            dataset_hash=request.dataset_hash,
+            status=DatasetImportStatus.STAGING,
+            source_count=request.source_count,
+            chunk_count=request.chunk_count,
+            relationship_count=request.relationship_count,
+            deletion_count=request.deletion_count,
+        )
+
+    def load_import(self, import_id: str, *, tenant_id: str) -> DatasetImportRun:
+        try:
+            psycopg = psycopg_module()
+            with (
+                psycopg.connect(
+                    self._connection_url,
+                    connect_timeout=self._timeout_seconds,
+                ) as connection,
+                connection.cursor() as cursor,
+            ):
+                cursor.execute(
+                    """
+                    SELECT import_id, domain, tenant_id, dataset_hash, status,
+                           source_count, chunk_count, relationship_count, deletion_count,
+                           indexed_sources, published_relationships, deleted_sources,
+                           error_code, error_message
+                    FROM ingestion.import_runs
+                    WHERE import_id = %s AND tenant_id = %s
+                    """,
+                    (import_id, tenant_id),
+                )
+                row = cursor.fetchone()
+                if row is None:
+                    raise IngestionError(f"Dataset import does not exist: {import_id}")
+                return _import_run(row)
+        except IngestionError:
+            raise
+        except Exception as exc:
+            raise DependencyUnavailableError("PostgreSQL import read failed") from exc
+
+    def update_import(
+        self,
+        import_id: str,
+        *,
+        status: DatasetImportStatus,
+        indexed_sources: int,
+        published_relationships: int,
+        deleted_sources: int,
+    ) -> None:
+        completed = status == DatasetImportStatus.COMPLETED
+        self._transition(
+            """
+            UPDATE ingestion.import_runs
+            SET status = %s,
+                indexed_sources = %s,
+                published_relationships = %s,
+                deleted_sources = %s,
+                error_code = NULL,
+                error_message = NULL,
+                updated_at = NOW(),
+                completed_at = CASE WHEN %s THEN NOW() ELSE NULL END
+            WHERE import_id = %s
+            """,
+            import_id,
+            "Dataset import state cannot be updated",
+            parameters=(
+                status.value,
+                indexed_sources,
+                published_relationships,
+                deleted_sources,
+                completed,
+                import_id,
+            ),
+        )
+
+    def fail_import(self, import_id: str, *, error_code: str, error_message: str) -> None:
+        self._transition(
+            """
+            UPDATE ingestion.import_runs
+            SET status = 'failed',
+                error_code = %s,
+                error_message = %s,
+                updated_at = NOW(),
+                completed_at = NOW()
+            WHERE import_id = %s
+            """,
+            import_id,
+            "Dataset import cannot enter failed state",
+            parameters=(error_code[:100], error_message[:2000], import_id),
+        )
+
+    def consistency_counts(self, *, domain: str, tenant_id: str) -> dict[str, int]:
+        try:
+            psycopg = psycopg_module()
+            with (
+                psycopg.connect(
+                    self._connection_url,
+                    connect_timeout=self._timeout_seconds,
+                ) as connection,
+                connection.cursor() as cursor,
+            ):
+                cursor.execute(
+                    """
+                    SELECT
+                        (SELECT COUNT(*)
+                         FROM ingestion.sources
+                         WHERE tenant_id = %s AND domain = %s),
+                        (SELECT COUNT(*)
+                         FROM ingestion.sources source
+                         JOIN ingestion.chunks chunk
+                           ON chunk.tenant_id = source.tenant_id
+                          AND chunk.domain = source.domain
+                          AND chunk.source_id = source.source_id
+                          AND chunk.source_version = source.current_version
+                         WHERE source.tenant_id = %s AND source.domain = %s),
+                        (SELECT COUNT(*)
+                         FROM graph.relationships relationship
+                         JOIN ingestion.sources source
+                           ON source.tenant_id = relationship.tenant_id
+                          AND source.domain = relationship.domain
+                          AND source.source_id = relationship.owner_source_id
+                          AND source.current_version = relationship.owner_source_version
+                         WHERE relationship.tenant_id = %s AND relationship.domain = %s)
+                    """,
+                    (tenant_id, domain, tenant_id, domain, tenant_id, domain),
+                )
+                row = cursor.fetchone()
+                if row is None:
+                    raise IngestionError("Dataset consistency query returned no result")
+                return {
+                    "active_sources": int(row[0]),
+                    "active_chunks": int(row[1]),
+                    "active_relationships": int(row[2]),
+                }
+        except IngestionError:
+            raise
+        except Exception as exc:
+            raise DependencyUnavailableError("PostgreSQL consistency check failed") from exc
+
     def _load_with_cursor(
         self,
         cursor: Any,
@@ -460,3 +767,22 @@ def _mapping(value: Any) -> dict[str, Any]:
     if not isinstance(decoded, dict):
         raise IngestionError("Stored ingestion metadata is invalid")
     return decoded
+
+
+def _import_run(row: tuple[Any, ...]) -> DatasetImportRun:
+    return DatasetImportRun(
+        import_id=str(row[0]),
+        domain=str(row[1]),
+        tenant_id=str(row[2]),
+        dataset_hash=str(row[3]),
+        status=DatasetImportStatus(str(row[4])),
+        source_count=int(row[5]),
+        chunk_count=int(row[6]),
+        relationship_count=int(row[7]),
+        deletion_count=int(row[8]),
+        indexed_sources=int(row[9]),
+        published_relationships=int(row[10]),
+        deleted_sources=int(row[11]),
+        error_code=row[12],
+        error_message=row[13],
+    )

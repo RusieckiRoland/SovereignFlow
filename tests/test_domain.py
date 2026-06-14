@@ -6,6 +6,10 @@ import pytest
 
 from sovereignflow.domain import (
     Citation,
+    DatasetConsistencyReport,
+    DatasetImportRequest,
+    DatasetImportRun,
+    DatasetImportStatus,
     DocumentChunk,
     DomainProfile,
     GraphDirection,
@@ -398,3 +402,68 @@ def test_pipeline_audit_models_require_valid_values() -> None:
         PipelineStepAudit("run", 0, "step", "action", "1.0", 0, None)
     with pytest.raises(ValidationError, match="duration_ms"):
         PipelineStepAudit("run", 1, "step", "action", "1.0", -1, None)
+
+
+def test_dataset_import_models_validate_counts_and_consistency() -> None:
+    request = DatasetImportRequest(
+        "import-1",
+        "general",
+        "tenant-a",
+        "a" * 64,
+        2,
+        3,
+        1,
+        1,
+    )
+    run = DatasetImportRun(
+        request.import_id,
+        request.domain,
+        request.tenant_id,
+        request.dataset_hash,
+        DatasetImportStatus.STAGING,
+        request.source_count,
+        request.chunk_count,
+        request.relationship_count,
+        request.deletion_count,
+        indexed_sources=1,
+    )
+    consistent = DatasetConsistencyReport("general", "tenant-a", 2, 3, 3, 1)
+    inconsistent = DatasetConsistencyReport("general", "tenant-a", 2, 3, 2, 1)
+
+    assert run.indexed_sources == 1
+    assert consistent.consistent is True
+    assert inconsistent.consistent is False
+
+    values = {
+        "source_count": 1,
+        "chunk_count": 1,
+        "relationship_count": 0,
+        "deletion_count": 0,
+    }
+    for field in values:
+        invalid = {**values, field: -1}
+        with pytest.raises(ValidationError):
+            DatasetImportRequest(
+                "import-1",
+                "general",
+                "tenant-a",
+                "a" * 64,
+                **invalid,
+            )
+    with pytest.raises(ValidationError, match="at least one"):
+        DatasetImportRequest("i", "d", "t", "h", 0, 1, 0, 0)
+    with pytest.raises(ValidationError, match="indexed_sources"):
+        DatasetImportRun(
+            "i",
+            "d",
+            "t",
+            "h",
+            DatasetImportStatus.STAGING,
+            1,
+            1,
+            0,
+            0,
+            indexed_sources=-1,
+        )
+    with pytest.raises(ValidationError, match="active_chunks"):
+        DatasetConsistencyReport("d", "t", 0, -1, 0, 0)

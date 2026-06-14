@@ -1,4 +1,5 @@
 from .audit import PostgreSQLExecutionAudit
+from .dataset_reader import JsonlDatasetReader, RelationshipScope
 from .graph import PostgreSQLGraphTraversal
 from .http_gateways import (
     EmbeddingEndpoint,
@@ -21,6 +22,8 @@ from .weaviate import (
 __all__ = [
     "EmbeddingEndpoint",
     "FilePromptRepository",
+    "JsonlDatasetReader",
+    "RelationshipScope",
     "ModelEndpoint",
     "OpenAIEmbeddingGateway",
     "OpenAIModelGateway",

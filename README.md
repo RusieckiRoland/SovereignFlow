@@ -64,6 +64,12 @@ The ingestion service:
 
 Failed indexing jobs remain explicit and can be retried by job identifier. No hidden fallback or silent data loss is permitted.
 
+Large neutral JSONL datasets can be imported with the separate
+`sovereignflow-import` CLI. The importer stages data without loading the complete
+dataset into memory, publishes relationships after source indexing, records durable
+progress, supports safe resumption, and exposes an explicit consistency check.
+See `docs/dataset-import.md`.
+
 ## Graph relationships
 
 Domain importers may attach neutral `GraphRelationship` records to an ingestion command. A relationship connects two document chunks using source and chunk identifiers plus a domain-defined relationship type.

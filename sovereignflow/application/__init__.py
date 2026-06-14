@@ -1,3 +1,4 @@
+from .dataset_import import DatasetImportService
 from .ingestion import DocumentIngestionService
 from .operations import OperationsService
 from .pipeline import (
@@ -22,6 +23,7 @@ from .query_service import RagQueryService
 
 __all__ = [
     "ActionRegistry",
+    "DatasetImportService",
     "DocumentIngestionService",
     "EmbeddingGatewayPort",
     "ExecutionAuditPort",

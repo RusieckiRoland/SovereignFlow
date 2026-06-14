@@ -6,6 +6,8 @@ import pytest
 
 from sovereignflow.domain import (
     ConflictError,
+    DatasetImportRequest,
+    DatasetImportStatus,
     DependencyUnavailableError,
     DocumentChunk,
     GraphNodeRef,
@@ -339,3 +341,150 @@ def test_health_check_and_metadata_helpers(monkeypatch) -> None:
     install(monkeypatch, Cursor(error=RuntimeError("down")))
     with pytest.raises(DependencyUnavailableError, match="health check"):
         repo.check()
+
+
+def import_request() -> DatasetImportRequest:
+    return DatasetImportRequest(
+        "import-1",
+        "general",
+        "tenant-a",
+        "c" * 64,
+        2,
+        3,
+        1,
+        1,
+    )
+
+
+def import_row(*, status="staging", dataset_hash=None):
+    return (
+        "import-1",
+        "general",
+        "tenant-a",
+        dataset_hash or "c" * 64,
+        status,
+        2,
+        3,
+        1,
+        1,
+        1,
+        1,
+        0,
+        None,
+        None,
+    )
+
+
+def test_relationship_publication_validates_active_source_and_targets(monkeypatch) -> None:
+    relationship = GraphRelationship(
+        GraphNodeRef("source-1", "chunk-1"),
+        GraphNodeRef("source-2", "chunk-2"),
+        "references",
+    )
+    selected = command(relationships=(relationship,))
+    cursor = Cursor(one=[("v1",), (True,)])
+    install(monkeypatch, cursor)
+
+    repository().replace_relationships(selected)
+
+    assert any("DELETE FROM graph.relationships" in item[0] for item in cursor.executed)
+    assert any("INSERT INTO graph.relationships" in item[0] for item in cursor.executed)
+
+    install(monkeypatch, Cursor(one=[("v2",)]))
+    with pytest.raises(ConflictError, match="active"):
+        repository().replace_relationships(selected)
+
+    install(monkeypatch, Cursor(one=[("v1",), (False,)]))
+    with pytest.raises(ConflictError, match="target"):
+        repository().replace_relationships(selected)
+
+    install(monkeypatch, Cursor(error=RuntimeError("down")))
+    with pytest.raises(DependencyUnavailableError, match="publication"):
+        repository().replace_relationships(selected)
+
+
+def test_source_deletion_is_atomic_and_maps_failure(monkeypatch) -> None:
+    cursor = Cursor()
+    connection = install(monkeypatch, cursor)[0]
+
+    repository().delete_source(
+        domain="general",
+        tenant_id="tenant-a",
+        source_id="source-1",
+    )
+
+    assert connection.commits == 1
+    assert any("DELETE FROM graph.relationships" in item[0] for item in cursor.executed)
+    assert any("DELETE FROM ingestion.sources" in item[0] for item in cursor.executed)
+
+    install(monkeypatch, Cursor(error=RuntimeError("down")))
+    with pytest.raises(DependencyUnavailableError, match="deletion"):
+        repository().delete_source(
+            domain="general",
+            tenant_id="tenant-a",
+            source_id="source-1",
+        )
+
+
+def test_import_run_start_load_update_fail_and_conflicts(monkeypatch) -> None:
+    create_cursor = Cursor(one=[None])
+    install(monkeypatch, create_cursor)
+    created = repository().start_import(import_request())
+    assert created.status == DatasetImportStatus.STAGING
+    assert any("INSERT INTO ingestion.import_runs" in item[0] for item in create_cursor.executed)
+
+    install(monkeypatch, Cursor(one=[import_row(status="completed")]))
+    existing = repository().start_import(import_request())
+    assert existing.status == DatasetImportStatus.COMPLETED
+
+    install(monkeypatch, Cursor(one=[import_row(dataset_hash="d" * 64)]))
+    with pytest.raises(ConflictError, match="different dataset"):
+        repository().start_import(import_request())
+
+    install(monkeypatch, Cursor(one=[import_row(status="relating")]))
+    loaded = repository().load_import("import-1", tenant_id="tenant-a")
+    assert loaded.published_relationships == 1
+
+    install(monkeypatch, Cursor(one=[None]))
+    with pytest.raises(IngestionError, match="does not exist"):
+        repository().load_import("missing", tenant_id="tenant-a")
+
+    update = Cursor(rowcount=1)
+    failure = Cursor(rowcount=1)
+    install(monkeypatch, update, failure)
+    repo = repository()
+    repo.update_import(
+        "import-1",
+        status=DatasetImportStatus.COMPLETED,
+        indexed_sources=2,
+        published_relationships=1,
+        deleted_sources=1,
+    )
+    repo.fail_import("import-1", error_code="e" * 120, error_message="m" * 2200)
+    assert update.executed[0][1][0] == "completed"
+    assert len(failure.executed[0][1][0]) == 100
+    assert len(failure.executed[0][1][1]) == 2000
+
+
+def test_import_repository_maps_dependency_failures(monkeypatch) -> None:
+    for operation in (
+        lambda: repository().start_import(import_request()),
+        lambda: repository().load_import("import-1", tenant_id="tenant-a"),
+        lambda: repository().consistency_counts(domain="general", tenant_id="tenant-a"),
+    ):
+        install(monkeypatch, Cursor(error=RuntimeError("down")))
+        with pytest.raises(DependencyUnavailableError):
+            operation()
+
+
+def test_consistency_counts_are_mapped_and_validated(monkeypatch) -> None:
+    install(monkeypatch, Cursor(one=[(2, 3, 4)]))
+    assert repository().consistency_counts(domain="general", tenant_id="tenant-a") == {
+        "active_sources": 2,
+        "active_chunks": 3,
+        "active_relationships": 4,
+    }
+
+    install(monkeypatch, Cursor(one=[None]))
+    with pytest.raises(IngestionError, match="no result"):
+        repository().consistency_counts(domain="general", tenant_id="tenant-a")
