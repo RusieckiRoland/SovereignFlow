@@ -29,7 +29,10 @@ def test_gateways_use_real_openai_compatible_http_protocol(http_server) -> None:
     )
     http_server.responses[("POST", "/v1/chat/completions")] = (
         200,
-        {"choices": [{"message": {"content": " grounded "}}]},
+        {
+            "choices": [{"message": {"content": " grounded "}}],
+            "usage": {"prompt_tokens": 100, "completion_tokens": 25},
+        },
         "application/json",
     )
     http_server.responses[("POST", "/v1/embeddings")] = (
@@ -38,7 +41,16 @@ def test_gateways_use_real_openai_compatible_http_protocol(http_server) -> None:
         "application/json",
     )
     model = OpenAIModelGateway(
-        ModelEndpoint("model", "local", base_url(http_server), "chat", "secret", 2)
+        ModelEndpoint(
+            "model",
+            "local",
+            base_url(http_server),
+            "chat",
+            "secret",
+            2,
+            2.0,
+            8.0,
+        )
     )
     embeddings = OpenAIEmbeddingGateway(
         EmbeddingEndpoint("embed", base_url(http_server), "vectors", "secret", 2)
@@ -50,7 +62,9 @@ def test_gateways_use_real_openai_compatible_http_protocol(http_server) -> None:
     answer = model.generate(system_prompt="system", user_prompt="question")
     vector = embeddings.embed_query("query")
 
-    assert answer == "grounded"
+    assert answer.text == "grounded"
+    assert answer.total_tokens == 125
+    assert answer.estimated_cost == pytest.approx(0.0004)
     assert vector == (1.0, 2.5)
     posts = [item for item in http_server.requests if item[0] == "POST"]
     assert posts[0][2]["Authorization"] == "Bearer secret"
@@ -60,9 +74,11 @@ def test_gateways_use_real_openai_compatible_http_protocol(http_server) -> None:
 
 def test_endpoints_validate_scope_and_timeout() -> None:
     with pytest.raises(ValidationError, match="scope"):
-        ModelEndpoint("model", "unknown", "http://x", "m", "", 1)
+        ModelEndpoint("model", "unknown", "http://x", "m", "", 1, 0, 0)
     with pytest.raises(ValidationError, match="timeout"):
-        ModelEndpoint("model", "local", "http://x", "m", "", 0)
+        ModelEndpoint("model", "local", "http://x", "m", "", 0, 0, 0)
+    with pytest.raises(ValidationError, match="cost"):
+        ModelEndpoint("model", "local", "http://x", "m", "", 1, -1, 0)
     with pytest.raises(ValidationError, match="timeout"):
         EmbeddingEndpoint("embed", "http://x", "m", "", 0)
 
@@ -125,9 +141,21 @@ class EmbeddingClient:
         ),
         (
             "/v1/chat/completions",
-            {"choices": [{"message": {"content": " "}}]},
+            {
+                "choices": [{"message": {"content": " "}}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+            },
             "model",
             "empty",
+        ),
+        (
+            "/v1/chat/completions",
+            {
+                "choices": [{"message": {"content": "answer"}}],
+                "usage": {"prompt_tokens": -1, "completion_tokens": 1},
+            },
+            "model",
+            "cannot be negative",
         ),
         (
             "/v1/embeddings",
@@ -158,7 +186,9 @@ def test_gateways_reject_invalid_provider_schemas(
 ) -> None:
     http_server.responses[("POST", path)] = (200, body, "application/json")
     if method == "model":
-        gateway = OpenAIModelGateway(ModelEndpoint("m", "local", base_url(http_server), "m", "", 1))
+        gateway = OpenAIModelGateway(
+            ModelEndpoint("m", "local", base_url(http_server), "m", "", 1, 0, 0)
+        )
         with pytest.raises(ProviderProtocolError, match=error):
             gateway.generate(system_prompt="s", user_prompt="u")
     else:

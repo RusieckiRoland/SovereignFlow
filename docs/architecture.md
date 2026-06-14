@@ -16,6 +16,8 @@ SovereignFlow owns reusable RAG mechanics:
 - durable execution history and step audit,
 - versioned, idempotent document ingestion,
 - bounded traversal of neutral document relationships.
+- authenticated, tenant-scoped operational administration;
+- durable quality, latency, token-usage, and cost metrics.
 
 Domain projects own source semantics and business rules.
 
@@ -69,7 +71,7 @@ Actions may return a named routing decision. The engine only follows routes decl
 
 `ExecutionAuditPort` belongs to the application boundary. PostgreSQL implements it through a parameterized adapter.
 
-The adapter stores run identity, tenant boundary, pipeline checksum, completed steps, selected transitions, durations, final output metadata, and safe error details. Schema migrations are bundled with the package, serialized with a PostgreSQL advisory lock, and protected by SHA-256 checksums.
+The adapter stores run identity, tenant boundary, pipeline checksum, completed steps, selected transitions, durations, final output metadata, provider-reported token usage, configured cost estimates, and safe error details. Schema migrations are bundled with the package, serialized with a PostgreSQL advisory lock, and protected by SHA-256 checksums.
 
 The application records the run before executing the first action and records completion or failure explicitly. Audit failure is a request failure because silently losing execution evidence would violate the platform contract.
 
@@ -122,4 +124,25 @@ External transmission is denied by configuration, not by convention. Configurati
 
 Weaviate anonymous access is disabled. Tenant, ACL, and classification boundaries are applied in retrieval and verified again before evidence is sent to the model.
 
-Execution-history reads require an explicit tenant identifier. SovereignFlow does not expose history over HTTP until an authenticated identity boundary is implemented.
+Execution-history, metrics, ingestion-job inspection, and ingestion retry are exposed only through the administrative API. Every administrative request requires:
+
+- the configured `X-SovereignFlow-Admin-Key`;
+- an explicit `tenant_id`;
+- tenant-scoped repository queries.
+
+The key is compared in constant time. Missing or invalid authentication fails with a stable `401` response. Tenant isolation is enforced in the application and persistence layers rather than inferred from request data.
+
+## Operational metrics
+
+Operational metrics are calculated from durable PostgreSQL audit records. SovereignFlow does not maintain a second in-memory statistics source.
+
+For a requested tenant and time window the API reports:
+
+- execution, success, and failure counts;
+- success rate and average execution duration;
+- average citation count and successful runs without evidence;
+- prompt, completion, and total token counts;
+- estimated model cost;
+- action-level execution counts and average durations.
+
+Model providers must return explicit `prompt_tokens` and `completion_tokens`. Missing or malformed usage is a provider-protocol failure. Cost is derived only from the configured per-million-token prices; it is never guessed from text length.

@@ -46,12 +46,20 @@ def test_postgresql_execution_audit_round_trip() -> None:
             None,
         )
     )
-    repository.succeed(successful_run_id, answer="answer", citation_count=1)
+    repository.succeed(
+        successful_run_id,
+        answer="answer",
+        citation_count=1,
+        prompt_tokens=20,
+        completion_tokens=10,
+        estimated_cost=0.125,
+    )
 
     result = repository.fetch(request_id, tenant_id="tenant-a")
     assert result is not None
     assert result["status"] == "succeeded"
     assert result["answer"] == "answer"
+    assert result["prompt_tokens"] + result["completion_tokens"] == 30
     assert result["steps"][0]["step_id"] == "normalize_query"
     assert repository.fetch(request_id, tenant_id="tenant-b") is None
 
@@ -79,3 +87,7 @@ def test_postgresql_execution_audit_round_trip() -> None:
     assert failed is not None
     assert failed["status"] == "failed"
     assert failed["error_code"] == "provider_protocol_error"
+
+    metrics = repository.metrics(tenant_id="tenant-a", hours=1)
+    assert metrics["executions"] >= 2
+    assert metrics["prompt_tokens"] >= 20

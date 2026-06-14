@@ -276,6 +276,16 @@ def test_load_reconstructs_graph_relationships(monkeypatch) -> None:
     assert job.command.relationships[0].metadata["weight"] == 1
 
 
+def test_load_for_tenant_scopes_database_query(monkeypatch) -> None:
+    cursor = Cursor(one=[job_row()], all_rows=[chunk_rows(), []])
+    install(monkeypatch, cursor)
+
+    loaded = repository().load_for_tenant("job-1", tenant_id="tenant-a")
+
+    assert loaded.job_id == "job-1"
+    assert cursor.executed[0][1] == ("job-1", "tenant-a", "tenant-a")
+
+
 def test_job_state_transitions_are_atomic_and_validated(monkeypatch) -> None:
     indexing = Cursor(rowcount=1)
     indexed = Cursor(one=[("tenant-a", "general", "source-1", "v1")])

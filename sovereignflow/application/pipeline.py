@@ -45,6 +45,9 @@ class PipelineContext:
     evidence: str = ""
     citations: tuple[Citation, ...] = ()
     answer: str = ""
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    estimated_cost: float = 0.0
     trace: list[str] = field(default_factory=list)
 
 
@@ -146,14 +149,18 @@ class CallModelAction:
     provides = frozenset({"answer"})
 
     def execute(self, context: PipelineContext) -> str | None:
-        context.answer = context.model.generate(
+        generation = context.model.generate(
             system_prompt=context.prompts.load(context.domain.prompt_name),
             user_prompt=(
                 f"USER QUESTION\n{context.normalized_query}\n\n"
                 f"EVIDENCE\n{context.evidence}\n\n"
                 "Answer from the evidence and state uncertainty explicitly."
             ),
-        ).strip()
+        )
+        context.answer = generation.text
+        context.prompt_tokens = generation.prompt_tokens
+        context.completion_tokens = generation.completion_tokens
+        context.estimated_cost = generation.estimated_cost
         return None
 
 
@@ -336,6 +343,9 @@ class PipelineEngine:
                 run_id,
                 answer=result.answer,
                 citation_count=len(result.citations),
+                prompt_tokens=context.prompt_tokens,
+                completion_tokens=context.completion_tokens,
+                estimated_cost=context.estimated_cost,
             )
             return result
         except Exception as exc:

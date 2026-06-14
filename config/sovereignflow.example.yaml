@@ -7,6 +7,9 @@ postgresql:
   connection_url_env: POSTGRES_URL
   timeout_seconds: 5
 
+admin:
+  api_key_env: SOVEREIGNFLOW_ADMIN_API_KEY
+
 selected_model: local-default
 models:
   - name: local-default
@@ -14,12 +17,16 @@ models:
     base_url: http://127.0.0.1:8080/v1
     model: your-local-model
     timeout_seconds: 120
+    input_cost_per_million: 0
+    output_cost_per_million: 0
   # - name: openai
   #   scope: external
   #   base_url: https://api.openai.com/v1
   #   model: your-openai-model
   #   api_key_env: OPENAI_API_KEY
   #   timeout_seconds: 120
+  #   input_cost_per_million: 0
+  #   output_cost_per_million: 0
 
 embeddings:
   name: local-embeddings

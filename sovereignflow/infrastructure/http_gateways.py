@@ -9,6 +9,7 @@ from typing import Any
 
 from sovereignflow.domain import (
     DependencyUnavailableError,
+    ModelGeneration,
     ProviderProtocolError,
     ValidationError,
 )
@@ -22,12 +23,16 @@ class ModelEndpoint:
     model: str
     api_key: str
     timeout_seconds: float
+    input_cost_per_million: float
+    output_cost_per_million: float
 
     def __post_init__(self) -> None:
         if self.scope not in {"local", "external"}:
             raise ValidationError("ModelEndpoint.scope must be 'local' or 'external'")
         if self.timeout_seconds <= 0:
             raise ValidationError("ModelEndpoint.timeout_seconds must be greater than zero")
+        if self.input_cost_per_million < 0 or self.output_cost_per_million < 0:
+            raise ValidationError("ModelEndpoint token costs cannot be negative")
 
 
 @dataclass(frozen=True)
@@ -125,7 +130,7 @@ class OpenAIModelGateway:
             timeout_seconds=self._endpoint.timeout_seconds,
         )
 
-    def generate(self, *, system_prompt: str, user_prompt: str) -> str:
+    def generate(self, *, system_prompt: str, user_prompt: str) -> ModelGeneration:
         response = self._http.post(
             url=f"{self._endpoint.base_url.rstrip('/')}/chat/completions",
             api_key=self._endpoint.api_key,
@@ -141,12 +146,25 @@ class OpenAIModelGateway:
         )
         try:
             content = response["choices"][0]["message"]["content"]
-        except (KeyError, IndexError, TypeError) as exc:
+            prompt_tokens = int(response["usage"]["prompt_tokens"])
+            completion_tokens = int(response["usage"]["completion_tokens"])
+        except (KeyError, IndexError, TypeError, ValueError) as exc:
             raise ProviderProtocolError("Model response has an invalid schema") from exc
         normalized = str(content or "").strip()
         if not normalized:
             raise ProviderProtocolError("Model response is empty")
-        return normalized
+        if prompt_tokens < 0 or completion_tokens < 0:
+            raise ProviderProtocolError("Model token usage cannot be negative")
+        estimated_cost = (
+            prompt_tokens * self._endpoint.input_cost_per_million
+            + completion_tokens * self._endpoint.output_cost_per_million
+        ) / 1_000_000
+        return ModelGeneration(
+            text=normalized,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            estimated_cost=estimated_cost,
+        )
 
 
 class OpenAIEmbeddingGateway:

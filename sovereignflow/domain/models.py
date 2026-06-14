@@ -318,6 +318,28 @@ class QueryResult:
     pipeline_trace: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class ModelGeneration:
+    text: str
+    prompt_tokens: int
+    completion_tokens: int
+    estimated_cost: float
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "text", _required(self.text, "ModelGeneration.text"))
+        if self.prompt_tokens < 0:
+            raise ValidationError("ModelGeneration.prompt_tokens cannot be negative")
+        if self.completion_tokens < 0:
+            raise ValidationError("ModelGeneration.completion_tokens cannot be negative")
+        if self.estimated_cost < 0:
+            raise ValidationError("ModelGeneration.estimated_cost cannot be negative")
+        object.__setattr__(self, "estimated_cost", float(self.estimated_cost))
+
+    @property
+    def total_tokens(self) -> int:
+        return self.prompt_tokens + self.completion_tokens
+
+
 class PipelineRunStatus(StrEnum):
     RUNNING = "running"
     SUCCEEDED = "succeeded"

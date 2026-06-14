@@ -1,4 +1,5 @@
 from .errors import (
+    AuthenticationError,
     ConfigurationError,
     ConflictError,
     DependencyUnavailableError,
@@ -24,6 +25,7 @@ from .models import (
     IngestionJob,
     IngestionJobStatus,
     IngestionResult,
+    ModelGeneration,
     PipelineDefinition,
     PipelineRun,
     PipelineRunStatus,
@@ -39,6 +41,7 @@ from .models import (
 
 __all__ = [
     "Citation",
+    "AuthenticationError",
     "ConfigurationError",
     "ConflictError",
     "DependencyUnavailableError",
@@ -55,6 +58,7 @@ __all__ = [
     "IngestionJob",
     "IngestionJobStatus",
     "IngestionResult",
+    "ModelGeneration",
     "PolicyViolationError",
     "PipelineDefinition",
     "PipelineDefinitionError",

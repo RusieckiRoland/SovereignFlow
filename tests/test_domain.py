@@ -13,6 +13,7 @@ from sovereignflow.domain import (
     GraphRelationship,
     GraphTraversalProfile,
     GraphTraversalRequest,
+    ModelGeneration,
     PipelineDefinition,
     PipelineRun,
     PipelineRunStatus,
@@ -49,6 +50,10 @@ def test_domain_models_normalize_and_freeze_values() -> None:
     assert chunk.acl_labels == ("alpha", "beta")
     assert isinstance(chunk.metadata, MappingProxyType)
     assert isinstance(request.filters, MappingProxyType)
+
+    generation = ModelGeneration(" answer ", 10, 5, 0.25)
+    assert generation.text == "answer"
+    assert generation.total_tokens == 15
 
 
 def test_graph_models_normalize_and_freeze_values(search_hit) -> None:
@@ -210,6 +215,9 @@ def test_graph_models_reject_invalid_values(factory, message: str) -> None:
             lambda: DocumentChunk("c", "d", "t", "s", "x", acl_labels=("",)),
             "acl_labels",
         ),
+        (lambda: ModelGeneration("answer", -1, 0, 0), "prompt_tokens"),
+        (lambda: ModelGeneration("answer", 0, -1, 0), "completion_tokens"),
+        (lambda: ModelGeneration("answer", 0, 0, -1), "estimated_cost"),
         (
             lambda: RetrievalProfile(SearchMode.HYBRID, 0, 1),
             "top_k",

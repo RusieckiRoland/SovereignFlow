@@ -7,6 +7,7 @@ from sovereignflow.domain import (
     GraphTraversalRequest,
     IngestionCommand,
     IngestionJob,
+    ModelGeneration,
     PipelineRun,
     PipelineStepAudit,
     SearchHit,
@@ -38,7 +39,7 @@ class ModelGatewayPort(Protocol):
     @property
     def scope(self) -> str: ...
 
-    def generate(self, *, system_prompt: str, user_prompt: str) -> str: ...
+    def generate(self, *, system_prompt: str, user_prompt: str) -> ModelGeneration: ...
 
     def healthcheck(self) -> None: ...
 
@@ -59,15 +60,30 @@ class ExecutionAuditPort(Protocol):
 
     def record_step(self, step: PipelineStepAudit) -> None: ...
 
-    def succeed(self, run_id: str, *, answer: str, citation_count: int) -> None: ...
+    def succeed(
+        self,
+        run_id: str,
+        *,
+        answer: str,
+        citation_count: int,
+        prompt_tokens: int,
+        completion_tokens: int,
+        estimated_cost: float,
+    ) -> None: ...
 
     def fail(self, run_id: str, *, error_code: str, error_message: str) -> None: ...
+
+    def fetch(self, request_id: str, *, tenant_id: str) -> dict | None: ...
+
+    def metrics(self, *, tenant_id: str, hours: int) -> dict: ...
 
 
 class IngestionRepositoryPort(Protocol):
     def stage(self, command: IngestionCommand, *, payload_hash: str) -> IngestionJob: ...
 
     def load(self, job_id: str) -> IngestionJob: ...
+
+    def load_for_tenant(self, job_id: str, *, tenant_id: str) -> IngestionJob: ...
 
     def mark_indexing(self, job_id: str) -> None: ...
 

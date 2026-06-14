@@ -9,6 +9,7 @@ from flask import Flask
 from sovereignflow.application import (
     DocumentIngestionService,
     HealthProbe,
+    OperationsService,
     PipelineEngine,
     PipelineValidator,
     RagQueryService,
@@ -75,6 +76,8 @@ def bootstrap(settings: SovereignFlowSettings) -> BootstrappedApplication:
             model=selected.model,
             api_key=selected.api_key,
             timeout_seconds=selected.timeout_seconds,
+            input_cost_per_million=selected.input_cost_per_million,
+            output_cost_per_million=selected.output_cost_per_million,
         )
     )
     prompts = FilePromptRepository(settings.prompts_root)
@@ -153,7 +156,16 @@ def bootstrap(settings: SovereignFlowSettings) -> BootstrappedApplication:
         for probe in probes:
             probe.check()
         application = BootstrappedApplication(
-            app=create_app(QueryDispatcher(services), probes),
+            app=create_app(
+                QueryDispatcher(services),
+                probes,
+                OperationsService(
+                    audit=audit,
+                    ingestion_repository=ingestion_repository,
+                    ingestion_services=ingestion_services,
+                ),
+                settings.admin.api_key,
+            ),
             weaviate_client=client,
             ingestion_services=ingestion_services,
         )

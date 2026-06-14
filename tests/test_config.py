@@ -60,8 +60,11 @@ def valid_files(tmp_path: Path) -> tuple[Path, dict]:
                 "base_url": "http://localhost:8080/v1",
                 "model": "chat",
                 "timeout_seconds": 30,
+                "input_cost_per_million": 1.5,
+                "output_cost_per_million": 6.0,
             }
         ],
+        "admin": {"api_key_env": "TEST_ADMIN_KEY"},
         "embeddings": {
             "name": "embed",
             "base_url": "http://localhost:8082/v1",
@@ -90,6 +93,7 @@ def secrets(monkeypatch) -> None:
     monkeypatch.setenv("TEST_WEAVIATE_KEY", "weaviate-secret")
     monkeypatch.setenv("TEST_MODEL_KEY", "model-secret")
     monkeypatch.setenv("TEST_EMBED_KEY", "embed-secret")
+    monkeypatch.setenv("TEST_ADMIN_KEY", "admin-secret")
 
 
 def write(path: Path, raw) -> None:
@@ -109,12 +113,17 @@ def test_load_settings_resolves_complete_configuration(tmp_path: Path) -> None:
     assert settings.weaviate.api_key == "weaviate-secret"
     assert settings.selected_model.api_key == "model-secret"
     assert settings.embeddings.api_key == "embed-secret"
+    assert settings.admin.api_key == "admin-secret"
+    assert settings.selected_model.input_cost_per_million == 1.5
     assert settings.domains[0].retrieval.mode == SearchMode.HYBRID
     assert settings.domains[0].graph.max_depth == 2
     assert settings.prompts_root == tmp_path / "prompts"
 
 
-@pytest.mark.parametrize("key", ["server", "postgresql", "weaviate", "embeddings"])
+@pytest.mark.parametrize(
+    "key",
+    ["server", "postgresql", "weaviate", "embeddings", "admin"],
+)
 def test_load_settings_requires_mapping_sections(tmp_path: Path, key: str) -> None:
     path, raw = valid_files(tmp_path)
     raw[key] = None
@@ -137,6 +146,14 @@ def test_load_settings_requires_mapping_sections(tmp_path: Path, key: str) -> No
         (
             lambda raw: raw["models"][0].update(scope="invalid"),
             "scope",
+        ),
+        (
+            lambda raw: raw["models"][0].update(input_cost_per_million=-1),
+            "input_cost_per_million",
+        ),
+        (
+            lambda raw: raw["models"][0].update(input_cost_per_million="invalid"),
+            "input_cost_per_million",
         ),
         (lambda raw: raw.update(domains=[]), "domains must"),
         (

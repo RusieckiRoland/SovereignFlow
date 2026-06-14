@@ -14,6 +14,7 @@ from sovereignflow.bootstrap.application import (
     bootstrap,
 )
 from sovereignflow.bootstrap.config import (
+    AdminSettings,
     EmbeddingSettings,
     ModelSettings,
     PostgreSQLSettings,
@@ -26,6 +27,7 @@ from sovereignflow.domain import (
     DomainProfile,
     GraphDirection,
     GraphTraversalProfile,
+    ModelGeneration,
     RetrievalProfile,
     SearchMode,
 )
@@ -47,8 +49,8 @@ class Healthy:
     def healthcheck(self) -> None:
         self.checked += 1
 
-    def generate(self, **kwargs) -> str:
-        return "answer"
+    def generate(self, **kwargs) -> ModelGeneration:
+        return ModelGeneration("answer", 1, 1, 0.0)
 
     def embed_query(self, text: str):
         return (0.1,)
@@ -137,7 +139,10 @@ def settings(tmp_path: Path) -> SovereignFlowSettings:
             "m",
             "",
             5,
+            0.0,
+            0.0,
         ),
+        admin=AdminSettings("admin-secret"),
         prompts_root=tmp_path,
         pipelines_root=tmp_path,
         domains=(

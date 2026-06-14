@@ -11,6 +11,8 @@ It is extracted from the architectural lessons of LocalAI-RAG, but it is not a c
 - **No runtime provider fallback** — one model endpoint is selected before a request; its failure fails the request.
 - **Evidence before answers** — responses retain citations and source metadata.
 - **PostgreSQL-backed execution audit** — pipeline runs, completed steps, results, and safe failures are stored durably.
+- **Durable operational metrics** — quality, latency, evidence, provider token usage, and configured cost estimates come from PostgreSQL audit records.
+- **Authenticated administration** — execution history, metrics, job inspection, and explicit retry are protected and tenant-scoped.
 - **Transactional document ingestion** — source versions, chunks, idempotency keys, and indexing jobs are committed atomically.
 - **Versioned graph relationships** — document relations follow source versions and are traversed with explicit safety limits.
 - **Weaviate for retrieval** — semantic, keyword, and hybrid search use generic document chunks.
@@ -114,8 +116,10 @@ Every query records:
 - each completed step and its action behavior version,
 - duration and selected transition,
 - final status, answer, citation count, or safe error information.
+- provider-reported prompt and completion token counts;
+- estimated cost calculated from explicit model pricing configuration.
 
-Audit reads are tenant-scoped. No unauthenticated audit endpoint is exposed.
+Audit reads are tenant-scoped and available only through the authenticated operations API.
 
 ## Repository layout
 
@@ -187,6 +191,8 @@ Edit `config/sovereignflow.yaml` and provide:
 - one selected local or external OpenAI-compatible model endpoint,
 - the domain profiles that should be exposed,
 - the pipeline directory and pipeline selected by each domain.
+- per-million-token input and output prices for the selected model;
+- the environment variable containing the administrative API key.
 
 The example configuration expects:
 
@@ -206,6 +212,7 @@ Use the same PostgreSQL password in `POSTGRES_URL` and Docker Compose.
 export POSTGRES_PASSWORD='replace-with-a-long-random-secret'
 export POSTGRES_URL='postgresql://sovereignflow:replace-with-a-long-random-secret@127.0.0.1:15432/sovereignflow'
 export WEAVIATE_API_KEY='replace-with-a-long-random-secret'
+export SOVEREIGNFLOW_ADMIN_API_KEY='replace-with-a-separate-long-random-secret'
 ```
 
 If the password contains URL-special characters, percent-encode it in `POSTGRES_URL`.
@@ -259,6 +266,8 @@ SovereignFlow expects OpenAI-compatible endpoints:
 - model health and generation through `/models` and `/chat/completions`,
 - embedding health and generation through `/models` and `/embeddings`.
 
+The chat-completion response must include `usage.prompt_tokens` and `usage.completion_tokens`. Missing usage is a protocol error. SovereignFlow does not estimate token counts from text.
+
 There is no fallback provider. If the selected service is unavailable, startup or the request fails.
 
 ### 7. Start SovereignFlow
@@ -281,6 +290,19 @@ Runtime endpoints:
 - `GET /live` — process liveness,
 - `GET /ready` — dependency readiness,
 - `POST /v1/query` — versioned RAG query API.
+- `GET /v1/admin/executions/{request_id}` — authenticated execution details.
+- `GET /v1/admin/metrics` — authenticated operational metrics.
+- `GET /v1/admin/ingestion/jobs/{job_id}` — authenticated job inspection.
+- `POST /v1/admin/ingestion/jobs/{job_id}/retry` — authenticated explicit retry.
+
+All administrative endpoints require:
+
+```text
+X-SovereignFlow-Admin-Key: <configured secret>
+tenant_id=<explicit tenant>
+```
+
+The full contract is documented in `docs/operations-api.md`.
 
 ### 8. Verify health
 
@@ -330,6 +352,14 @@ The response contains:
 
 The execution and each completed pipeline step are also recorded in PostgreSQL.
 
+### 10. Inspect operational metrics
+
+```bash
+curl --fail-with-body \
+  'http://127.0.0.1:8000/v1/admin/metrics?tenant_id=tenant-a&hours=24' \
+  -H "X-SovereignFlow-Admin-Key: ${SOVEREIGNFLOW_ADMIN_API_KEY}"
+```
+
 ## Testing
 
 Run the complete unit and protocol-integration test suite with branch coverage:
@@ -374,11 +404,10 @@ ruff format --check sovereignflow tests
 python -m compileall -q sovereignflow tests
 ```
 
-## Current limitations
+## Current boundaries
 
-Stage 4 intentionally does not yet include:
+The reusable foundation intentionally does not include:
 
-- authenticated execution-history API,
 - domain-specific PostgreSQL schemas,
 - domain synchronization workers,
 - source-specific parsing or chunking,
@@ -389,4 +418,6 @@ Stage 4 intentionally does not yet include:
 
 ## Status
 
-Stage 4 is complete: the reusable foundation now includes versioned graph relationships, bounded PostgreSQL traversal, relationship allowlists, direction controls, graph-aware pipeline execution, and security-filtered graph evidence. The next milestones are observability, authenticated operational APIs, and the first domain package.
+Stage 5 is complete. SovereignFlow 1.0 provides the professional domain-neutral foundation extracted from LocalAI-RAG: clean architectural boundaries, versioned pipelines, durable ingestion, Weaviate retrieval, PostgreSQL graph expansion, explicit model and embedding services, execution audit, operational metrics, and authenticated tenant-scoped administration.
+
+The next work belongs to domain packages such as TaricAI and to optional platform evolution that preserves these public contracts.

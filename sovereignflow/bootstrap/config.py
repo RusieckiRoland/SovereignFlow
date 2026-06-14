@@ -56,6 +56,13 @@ class ModelSettings:
     model: str
     api_key: str
     timeout_seconds: float
+    input_cost_per_million: float
+    output_cost_per_million: float
+
+
+@dataclass(frozen=True)
+class AdminSettings:
+    api_key: str
 
 
 @dataclass(frozen=True)
@@ -66,6 +73,7 @@ class SovereignFlowSettings:
     weaviate: WeaviateSettings
     embeddings: EmbeddingSettings
     selected_model: ModelSettings
+    admin: AdminSettings
     prompts_root: Path
     pipelines_root: Path
     domains: tuple[DomainProfile, ...]
@@ -78,6 +86,7 @@ def load_settings(path: str | Path) -> SovereignFlowSettings:
     postgresql = _mapping(raw, "postgresql")
     weaviate = _mapping(raw, "weaviate")
     embeddings = _mapping(raw, "embeddings")
+    admin = _mapping(raw, "admin")
 
     models_raw = raw.get("models")
     if not isinstance(models_raw, list) or not models_raw:
@@ -158,6 +167,7 @@ def load_settings(path: str | Path) -> SovereignFlowSettings:
             ),
         ),
         selected_model=selected,
+        admin=AdminSettings(api_key=_secret(admin.get("api_key_env"))),
         prompts_root=prompt_root,
         pipelines_root=pipelines_root,
         domains=domains,
@@ -179,6 +189,14 @@ def _model_settings(raw: Any) -> ModelSettings:
         timeout_seconds=_positive_float(
             raw.get("timeout_seconds"),
             "models[].timeout_seconds",
+        ),
+        input_cost_per_million=_non_negative_float(
+            raw.get("input_cost_per_million"),
+            "models[].input_cost_per_million",
+        ),
+        output_cost_per_million=_non_negative_float(
+            raw.get("output_cost_per_million"),
+            "models[].output_cost_per_million",
         ),
     )
 
@@ -289,6 +307,16 @@ def _positive_float(value: Any, field_name: str) -> float:
         raise ConfigurationError(f"{field_name} must be numeric") from exc
     if result <= 0:
         raise ConfigurationError(f"{field_name} must be greater than zero")
+    return result
+
+
+def _non_negative_float(value: Any, field_name: str) -> float:
+    try:
+        result = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ConfigurationError(f"{field_name} must be numeric") from exc
+    if result < 0:
+        raise ConfigurationError(f"{field_name} cannot be negative")
     return result
 
 

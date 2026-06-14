@@ -1,10 +1,12 @@
 from .application import (
     DocumentIngestionService,
+    OperationsService,
     PipelineEngine,
     PipelineValidator,
     RagQueryService,
 )
 from .domain import (
+    AuthenticationError,
     Citation,
     ConfigurationError,
     DependencyUnavailableError,
@@ -21,6 +23,7 @@ from .domain import (
     IngestionJob,
     IngestionJobStatus,
     IngestionResult,
+    ModelGeneration,
     PipelineDefinition,
     PipelineDefinitionError,
     PipelineExecutionError,
@@ -42,6 +45,7 @@ from .domain import (
 
 __all__ = [
     "Citation",
+    "AuthenticationError",
     "ConfigurationError",
     "DependencyUnavailableError",
     "DocumentChunk",
@@ -58,6 +62,8 @@ __all__ = [
     "IngestionJob",
     "IngestionJobStatus",
     "IngestionResult",
+    "ModelGeneration",
+    "OperationsService",
     "PipelineDefinition",
     "PipelineDefinitionError",
     "PipelineEngine",

@@ -195,6 +195,12 @@ class PostgreSQLIngestionRepository:
         )
 
     def load(self, job_id: str) -> IngestionJob:
+        return self._load(job_id)
+
+    def load_for_tenant(self, job_id: str, *, tenant_id: str) -> IngestionJob:
+        return self._load(job_id, tenant_id=tenant_id)
+
+    def _load(self, job_id: str, *, tenant_id: str | None = None) -> IngestionJob:
         try:
             psycopg = psycopg_module()
             with (
@@ -204,7 +210,7 @@ class PostgreSQLIngestionRepository:
                 ) as connection,
                 connection.cursor() as cursor,
             ):
-                return self._load_with_cursor(cursor, job_id)
+                return self._load_with_cursor(cursor, job_id, tenant_id=tenant_id)
         except IngestionError:
             raise
         except Exception as exc:
@@ -282,7 +288,13 @@ class PostgreSQLIngestionRepository:
             parameters=(error_code[:100], error_message[:2000], job_id),
         )
 
-    def _load_with_cursor(self, cursor: Any, job_id: str) -> IngestionJob:
+    def _load_with_cursor(
+        self,
+        cursor: Any,
+        job_id: str,
+        *,
+        tenant_id: str | None = None,
+    ) -> IngestionJob:
         cursor.execute(
             """
             SELECT j.job_id, j.payload_hash, j.status, j.attempts,
@@ -295,8 +307,9 @@ class PostgreSQLIngestionRepository:
              AND v.source_id = j.source_id
              AND v.source_version = j.source_version
             WHERE j.job_id = %s
+              AND (%s::text IS NULL OR j.tenant_id = %s)
             """,
-            (job_id,),
+            (job_id, tenant_id, tenant_id),
         )
         row = cursor.fetchone()
         if row is None:

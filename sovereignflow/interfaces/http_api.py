@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import hmac
 import uuid
 from collections.abc import Mapping, Sequence
 from typing import Any
 
 from flask import Flask, jsonify, request
 
-from sovereignflow.application import HealthProbe, RagQueryService
+from sovereignflow.application import HealthProbe, OperationsService, RagQueryService
 from sovereignflow.domain import (
+    AuthenticationError,
     DomainNotFoundError,
     QueryCommand,
     SovereignFlowError,
@@ -33,9 +35,21 @@ class QueryDispatcher:
 def create_app(
     dispatcher: QueryDispatcher,
     readiness_probes: Sequence[HealthProbe],
+    operations: OperationsService,
+    admin_api_key: str,
 ) -> Flask:
     app = Flask(__name__)
     probes = tuple(readiness_probes)
+    if not admin_api_key:
+        raise ValidationError("admin_api_key is required")
+
+    def authenticate_admin() -> None:
+        supplied = str(request.headers.get("X-SovereignFlow-Admin-Key") or "")
+        if not hmac.compare_digest(supplied, admin_api_key):
+            raise AuthenticationError("Administrative authentication failed")
+
+    def tenant_id() -> str:
+        return str(request.args.get("tenant_id") or "").strip()
 
     @app.get("/live")
     def live() -> Any:
@@ -93,6 +107,48 @@ def create_app(
                     for citation in result.citations
                 ],
                 "pipeline_trace": list(result.pipeline_trace),
+            }
+        )
+
+    @app.get("/v1/admin/executions/<request_id>")
+    def execution(request_id: str) -> Any:
+        authenticate_admin()
+        payload = operations.execution(request_id, tenant_id=tenant_id())
+        if payload is None:
+            return jsonify({"ok": True, "execution": None})
+        return jsonify({"ok": True, "execution": payload})
+
+    @app.get("/v1/admin/metrics")
+    def metrics() -> Any:
+        authenticate_admin()
+        try:
+            hours = int(request.args.get("hours", "24"))
+        except ValueError as exc:
+            raise ValidationError("hours must be an integer") from exc
+        return jsonify(
+            {
+                "ok": True,
+                "metrics": operations.metrics(tenant_id=tenant_id(), hours=hours),
+            }
+        )
+
+    @app.get("/v1/admin/ingestion/jobs/<job_id>")
+    def ingestion_job(job_id: str) -> Any:
+        authenticate_admin()
+        return jsonify(
+            {
+                "ok": True,
+                "job": operations.ingestion_job(job_id, tenant_id=tenant_id()),
+            }
+        )
+
+    @app.post("/v1/admin/ingestion/jobs/<job_id>/retry")
+    def retry_ingestion(job_id: str) -> Any:
+        authenticate_admin()
+        return jsonify(
+            {
+                "ok": True,
+                "job": operations.retry_ingestion(job_id, tenant_id=tenant_id()),
             }
         )
 

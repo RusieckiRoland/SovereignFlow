@@ -1,4 +1,5 @@
 from .ingestion import DocumentIngestionService
+from .operations import OperationsService
 from .pipeline import (
     ActionRegistry,
     PipelineContext,
@@ -28,6 +29,7 @@ __all__ = [
     "HealthProbe",
     "IngestionRepositoryPort",
     "ModelGatewayPort",
+    "OperationsService",
     "PipelineContext",
     "PipelineEngine",
     "PipelineValidator",

@@ -15,6 +15,7 @@ from sovereignflow.domain import (
     DomainProfile,
     GraphDirection,
     GraphTraversalProfile,
+    ModelGeneration,
     PipelineDefinition,
     PipelineStepDefinition,
     RetrievalProfile,
@@ -65,9 +66,14 @@ class StubModel:
     def scope(self) -> str:
         return self._scope
 
-    def generate(self, **kwargs) -> str:
+    def generate(self, **kwargs) -> ModelGeneration:
         self.calls.append(kwargs)
-        return self.answer
+        return ModelGeneration(
+            text=self.answer,
+            prompt_tokens=10,
+            completion_tokens=5,
+            estimated_cost=0.001,
+        )
 
     def healthcheck(self) -> None:
         if not self.healthy:
@@ -102,6 +108,26 @@ class StubAudit:
 
     def fail(self, run_id: str, **kwargs) -> None:
         self.failed.append((run_id, kwargs))
+
+    def fetch(self, request_id: str, *, tenant_id: str):
+        return None
+
+    def metrics(self, *, tenant_id: str, hours: int):
+        return {"tenant_id": tenant_id, "window_hours": hours}
+
+
+class StubOperations:
+    def execution(self, request_id: str, *, tenant_id: str):
+        return None
+
+    def metrics(self, *, tenant_id: str, hours: int):
+        return {"tenant_id": tenant_id, "window_hours": hours}
+
+    def ingestion_job(self, job_id: str, *, tenant_id: str):
+        return {"job_id": job_id, "tenant_id": tenant_id}
+
+    def retry_ingestion(self, job_id: str, *, tenant_id: str):
+        return {"job_id": job_id, "tenant_id": tenant_id, "status": "completed"}
 
 
 def default_pipeline() -> PipelineDefinition:

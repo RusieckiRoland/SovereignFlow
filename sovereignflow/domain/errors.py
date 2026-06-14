@@ -57,3 +57,8 @@ class ConflictError(SovereignFlowError):
 class IngestionError(SovereignFlowError):
     code = "ingestion_error"
     http_status = 500
+
+
+class AuthenticationError(SovereignFlowError):
+    code = "authentication_error"
+    http_status = 401

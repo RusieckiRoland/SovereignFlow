@@ -89,7 +89,14 @@ def test_audit_write_methods_use_parameterized_statements(monkeypatch) -> None:
 
     repository.start(run())
     repository.record_step(PipelineStepAudit(run().run_id, 1, "step", "action", "1.0", 5, None))
-    repository.succeed(run().run_id, answer="answer", citation_count=2)
+    repository.succeed(
+        run().run_id,
+        answer="answer",
+        citation_count=2,
+        prompt_tokens=10,
+        completion_tokens=5,
+        estimated_cost=0.25,
+    )
     repository.fail(run().run_id, error_code="e" * 120, error_message="m" * 2100)
 
     assert calls[0][-1] == "query"
@@ -141,6 +148,9 @@ def test_audit_fetch_returns_tenant_scoped_run_and_steps(monkeypatch) -> None:
         None,
         "started",
         "completed",
+        10,
+        5,
+        0.25,
     )
     step_row = (1, "step", "action", "1.0", 5, None, "completed")
     cursor = Cursor(one=[run_row], all_rows=[[step_row]])
@@ -150,6 +160,7 @@ def test_audit_fetch_returns_tenant_scoped_run_and_steps(monkeypatch) -> None:
 
     assert result is not None
     assert result["status"] == "succeeded"
+    assert result["prompt_tokens"] == 10
     assert result["steps"][0]["action"] == "action"
     assert cursor.executed[0][1] == ("request", "tenant")
 
@@ -169,3 +180,32 @@ def test_audit_fetch_handles_missing_and_database_failure(monkeypatch) -> None:
     )
     with pytest.raises(DependencyUnavailableError, match="read"):
         audit().fetch("request", tenant_id="tenant")
+
+
+def test_audit_metrics_returns_tenant_scoped_aggregates(monkeypatch) -> None:
+    summary = (4, 3, 1, 125.5, 2.0, 1, 100, 25, 0.75)
+    actions = [("retrieve", 4, 12.5), ("call_model", 3, 80.0)]
+    cursor = Cursor(one=[summary], all_rows=[actions])
+    monkeypatch.setattr(audit_module, "psycopg_module", lambda: module_for(Connection(cursor)))
+
+    result = audit().metrics(tenant_id="tenant", hours=24)
+
+    assert result["success_rate"] == 0.75
+    assert result["total_tokens"] == 125
+    assert result["estimated_cost"] == 0.75
+    assert result["actions"][1]["action"] == "call_model"
+    assert cursor.executed[0][1] == ("tenant", 24)
+
+
+def test_audit_metrics_handles_empty_window_and_database_failure(monkeypatch) -> None:
+    cursor = Cursor(one=[(0, 0, 0, 0, 0, 0, 0, 0, 0)], all_rows=[[]])
+    monkeypatch.setattr(audit_module, "psycopg_module", lambda: module_for(Connection(cursor)))
+    assert audit().metrics(tenant_id="tenant", hours=1)["success_rate"] == 0.0
+
+    monkeypatch.setattr(
+        audit_module,
+        "psycopg_module",
+        lambda: module_for(Connection(Cursor(error=RuntimeError("down")))),
+    )
+    with pytest.raises(DependencyUnavailableError, match="metrics"):
+        audit().metrics(tenant_id="tenant", hours=1)
