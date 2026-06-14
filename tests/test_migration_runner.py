@@ -70,7 +70,7 @@ def test_migrations_are_applied_in_order(monkeypatch) -> None:
         statement for statement, _ in cursor.executed if "CREATE SCHEMA" in statement
     ]
     assert connection.commits == 1
-    assert len(migration_statements) == 2
+    assert len(migration_statements) == 3
 
 
 def test_existing_migrations_are_verified_and_skipped(monkeypatch) -> None:

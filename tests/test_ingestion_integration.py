@@ -9,12 +9,19 @@ from sovereignflow.application import DocumentIngestionService
 from sovereignflow.domain import (
     DocumentChunk,
     DomainProfile,
+    GraphDirection,
+    GraphNodeRef,
+    GraphRelationship,
+    GraphTraversalProfile,
+    GraphTraversalRequest,
     IngestionCommand,
     RetrievalProfile,
+    SearchHit,
     SearchMode,
     SearchRequest,
 )
 from sovereignflow.infrastructure import (
+    PostgreSQLGraphTraversal,
     PostgreSQLIngestionRepository,
     PostgreSQLMigrationRunner,
     WeaviateCollectionMigrator,
@@ -72,6 +79,7 @@ def test_document_ingestion_round_trip_across_postgresql_and_weaviate() -> None:
             prompt_name="answer",
             allow_external_model=False,
             retrieval=RetrievalProfile(SearchMode.SEMANTIC, 10, 1000),
+            graph=GraphTraversalProfile(False, 1, 1, GraphDirection.BOTH),
             allowed_acl_labels=("public",),
             max_classification_level=1,
         )
@@ -122,6 +130,58 @@ def test_document_ingestion_round_trip_across_postgresql_and_weaviate() -> None:
         assert [hit.chunk.chunk_id for hit in hits] == ["chunk-1"]
         assert hits[0].chunk.text == "content-v2-chunk-1"
 
+        target_source_id = f"target-{identity}"
+        service.ingest(
+            ingestion_command(
+                identity="target",
+                domain=domain_name,
+                tenant_id=tenant_id,
+                source_id=target_source_id,
+                version="v1",
+                chunk_ids=("target-chunk",),
+            )
+        )
+        source_v3 = ingestion_command(
+            identity="third",
+            domain=domain_name,
+            tenant_id=tenant_id,
+            source_id=source_id,
+            version="v3",
+            chunk_ids=("chunk-1",),
+            relationships=(
+                GraphRelationship(
+                    GraphNodeRef(source_id, "chunk-1"),
+                    GraphNodeRef(target_source_id, "target-chunk"),
+                    "references",
+                ),
+            ),
+        )
+        service.ingest(source_v3)
+        graph_hits = PostgreSQLGraphTraversal(
+            postgres_url,
+            timeout_seconds=5,
+        ).expand(
+            GraphTraversalRequest(
+                seeds=(
+                    SearchHit(
+                        source_v3.chunks[0],
+                        0.9,
+                        "semantic",
+                    ),
+                ),
+                domain=domain_name,
+                tenant_id=tenant_id,
+                max_depth=2,
+                max_nodes=10,
+                direction=GraphDirection.OUTGOING,
+                relationship_types=("references",),
+                allowed_acl_labels=("public",),
+                max_classification_level=1,
+            )
+        )
+        assert [item.chunk.source_id for item in graph_hits] == [target_source_id]
+        assert graph_hits[0].chunk.metadata["graph_depth"] == 1
+
         with psycopg.connect(postgres_url) as connection, connection.cursor() as cursor:
             cursor.execute(
                 """
@@ -131,7 +191,7 @@ def test_document_ingestion_round_trip_across_postgresql_and_weaviate() -> None:
                 """,
                 (tenant_id, domain_name, source_id),
             )
-            assert cursor.fetchone() == ("v2",)
+            assert cursor.fetchone() == ("v3",)
     finally:
         if client.collections.exists(collection_name):
             client.collections.delete(collection_name)
@@ -146,6 +206,7 @@ def ingestion_command(
     source_id: str,
     version: str,
     chunk_ids: tuple[str, ...],
+    relationships: tuple[GraphRelationship, ...] = (),
 ) -> IngestionCommand:
     return IngestionCommand(
         idempotency_key=f"{identity}-{source_id}",
@@ -153,6 +214,7 @@ def ingestion_command(
         tenant_id=tenant_id,
         source_id=source_id,
         source_version=version,
+        relationships=relationships,
         chunks=tuple(
             DocumentChunk(
                 chunk_id=chunk_id,

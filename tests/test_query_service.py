@@ -3,7 +3,14 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
-from conftest import StubAudit, StubModel, StubPrompts, StubRetrieval, build_query_service
+from conftest import (
+    StubAudit,
+    StubGraph,
+    StubModel,
+    StubPrompts,
+    StubRetrieval,
+    build_query_service,
+)
 
 from sovereignflow.domain import (
     DocumentChunk,
@@ -46,6 +53,7 @@ def test_query_service_executes_complete_vertical_flow(
     assert result.pipeline_trace == (
         "normalize_query",
         "retrieve",
+        "expand_graph",
         "build_context",
         "call_model",
         "finalize",
@@ -61,6 +69,84 @@ def test_query_service_executes_complete_vertical_flow(
     assert audit.started[0].pipeline_checksum == "a" * 64
     assert [item.step_id for item in audit.steps] == list(result.pipeline_trace)
     assert audit.succeeded[0][1]["citation_count"] == 1
+
+
+def test_query_service_expands_graph_with_explicit_policy(
+    domain_profile,
+    search_hit,
+) -> None:
+    related = replace(
+        search_hit,
+        chunk=replace(
+            search_hit.chunk,
+            source_id="source-2",
+            chunk_id="chunk-2",
+            text="Related evidence.",
+        ),
+        score=0.25,
+        score_type="graph",
+    )
+    graph = StubGraph((related,))
+    model = StubModel()
+    result = build_query_service(
+        domain=domain_profile,
+        retrieval=StubRetrieval((search_hit,)),
+        graph=graph,
+        model=model,
+        prompts=StubPrompts(),
+    ).execute(command())
+
+    assert len(result.citations) == 2
+    assert graph.requests[0].max_depth == 2
+    assert graph.requests[0].relationship_types == ("references",)
+    assert "Related evidence." in model.calls[0]["user_prompt"]
+
+
+def test_query_service_skips_graph_when_explicitly_disabled(
+    domain_profile,
+    search_hit,
+) -> None:
+    graph = StubGraph()
+    domain = replace(
+        domain_profile,
+        graph=replace(domain_profile.graph, enabled=False),
+    )
+
+    build_query_service(
+        domain=domain,
+        retrieval=StubRetrieval((search_hit,)),
+        graph=graph,
+        model=StubModel(),
+        prompts=StubPrompts(),
+    ).execute(command())
+
+    assert graph.requests == []
+
+
+def test_query_service_rechecks_graph_security_boundary(
+    domain_profile,
+    search_hit,
+) -> None:
+    forbidden = replace(
+        search_hit,
+        chunk=replace(
+            search_hit.chunk,
+            source_id="source-2",
+            chunk_id="chunk-2",
+            acl_labels=("private",),
+        ),
+        score_type="graph",
+    )
+    service = build_query_service(
+        domain=domain_profile,
+        retrieval=StubRetrieval((search_hit,)),
+        graph=StubGraph((forbidden,)),
+        model=StubModel(),
+        prompts=StubPrompts(),
+    )
+
+    with pytest.raises(PolicyViolationError, match="ACL"):
+        service.execute(command())
 
 
 def test_query_service_uses_explicit_no_evidence_message(domain_profile) -> None:

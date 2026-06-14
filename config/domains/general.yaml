@@ -14,3 +14,9 @@ retrieval:
   top_k: 8
   max_context_characters: 24000
   filters: {}
+graph:
+  enabled: true
+  max_depth: 2
+  max_nodes: 40
+  direction: both
+  relationship_types: []

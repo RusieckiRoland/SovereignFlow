@@ -2,7 +2,7 @@ pipeline:
   name: default-rag
   entry_step: normalize_query
   behavior_version: "1.0"
-  max_steps: 5
+  max_steps: 6
   steps:
     - id: normalize_query
       action: normalize_query
@@ -11,6 +11,11 @@ pipeline:
 
     - id: retrieve
       action: retrieve
+      action_version: "1.0"
+      next: expand_graph
+
+    - id: expand_graph
+      action: expand_graph
       action_version: "1.0"
       next: build_context
 

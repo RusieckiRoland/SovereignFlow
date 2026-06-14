@@ -8,6 +8,8 @@ from sovereignflow.domain import (
     ConflictError,
     DependencyUnavailableError,
     DocumentChunk,
+    GraphNodeRef,
+    GraphRelationship,
     IngestionCommand,
     IngestionError,
     IngestionJobStatus,
@@ -16,7 +18,7 @@ from sovereignflow.infrastructure import PostgreSQLIngestionRepository
 from sovereignflow.infrastructure import ingestion as ingestion_module
 
 
-def command() -> IngestionCommand:
+def command(*, relationships=()) -> IngestionCommand:
     return IngestionCommand(
         idempotency_key="key-1",
         domain="general",
@@ -37,6 +39,7 @@ def command() -> IngestionCommand:
                 classification_level=1,
             ),
         ),
+        relationships=relationships,
     )
 
 
@@ -196,6 +199,35 @@ def test_stage_reuses_identical_source_version_and_maps_database_failure(monkeyp
         repository().stage(command(), payload_hash="a" * 64)
 
 
+def test_stage_persists_internal_and_validates_external_relationships(monkeypatch) -> None:
+    internal = GraphRelationship(
+        GraphNodeRef("source-1", "chunk-1"),
+        GraphNodeRef("source-1", "chunk-1"),
+        "self",
+        {"weight": 1},
+    )
+    internal_cursor = Cursor(one=[None, None])
+    install(monkeypatch, internal_cursor)
+    repository().stage(command(relationships=(internal,)), payload_hash="a" * 64)
+    assert any(
+        "INSERT INTO graph.relationships" in statement for statement, _ in internal_cursor.executed
+    )
+
+    external = GraphRelationship(
+        GraphNodeRef("source-1", "chunk-1"),
+        GraphNodeRef("source-2", "chunk-2"),
+        "references",
+    )
+    external_cursor = Cursor(one=[None, None, (True,)])
+    install(monkeypatch, external_cursor)
+    repository().stage(command(relationships=(external,)), payload_hash="b" * 64)
+    assert any("SELECT EXISTS" in statement for statement, _ in external_cursor.executed)
+
+    install(monkeypatch, Cursor(one=[None, None, (False,)]))
+    with pytest.raises(ConflictError, match="target does not exist"):
+        repository().stage(command(relationships=(external,)), payload_hash="c" * 64)
+
+
 def test_load_reconstructs_job_and_rejects_missing_or_corrupt_data(monkeypatch) -> None:
     install(monkeypatch, Cursor(one=[job_row(status="failed")], all_rows=[chunk_rows()]))
     job = repository().load("job-1")
@@ -217,6 +249,31 @@ def test_load_reconstructs_job_and_rejects_missing_or_corrupt_data(monkeypatch) 
     install(monkeypatch, Cursor(error=RuntimeError("down")))
     with pytest.raises(DependencyUnavailableError, match="read failed"):
         repository().load("job-1")
+
+
+def test_load_reconstructs_graph_relationships(monkeypatch) -> None:
+    relationship_rows = [
+        (
+            "source-1",
+            "chunk-1",
+            "source-2",
+            "chunk-2",
+            "references",
+            '{"weight":1}',
+        )
+    ]
+    install(
+        monkeypatch,
+        Cursor(
+            one=[job_row()],
+            all_rows=[chunk_rows(), relationship_rows],
+        ),
+    )
+
+    job = repository().load("job-1")
+
+    assert job.command.relationships[0].to_node == GraphNodeRef("source-2", "chunk-2")
+    assert job.command.relationships[0].metadata["weight"] == 1
 
 
 def test_job_state_transitions_are_atomic_and_validated(monkeypatch) -> None:

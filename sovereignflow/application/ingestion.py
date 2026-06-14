@@ -108,6 +108,26 @@ def _payload_hash(command: IngestionCommand) -> str:
             }
             for chunk in sorted(command.chunks, key=lambda item: item.chunk_id)
         ],
+        "relationships": [
+            {
+                "from_source_id": relationship.from_node.source_id,
+                "from_chunk_id": relationship.from_node.chunk_id,
+                "to_source_id": relationship.to_node.source_id,
+                "to_chunk_id": relationship.to_node.chunk_id,
+                "relationship_type": relationship.relationship_type,
+                "metadata": dict(relationship.metadata),
+            }
+            for relationship in sorted(
+                command.relationships,
+                key=lambda item: (
+                    item.from_node.source_id,
+                    item.from_node.chunk_id,
+                    item.to_node.source_id,
+                    item.to_node.chunk_id,
+                    item.relationship_type,
+                ),
+            )
+        ],
     }
     try:
         canonical = json.dumps(

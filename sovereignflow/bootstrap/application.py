@@ -22,6 +22,7 @@ from sovereignflow.infrastructure import (
     OpenAIEmbeddingGateway,
     OpenAIModelGateway,
     PostgreSQLExecutionAudit,
+    PostgreSQLGraphTraversal,
     PostgreSQLHealthProbe,
     PostgreSQLIngestionRepository,
     PostgreSQLMigrationRunner,
@@ -90,6 +91,10 @@ def bootstrap(settings: SovereignFlowSettings) -> BootstrappedApplication:
         settings.postgresql.connection_url,
         timeout_seconds=settings.postgresql.timeout_seconds,
     )
+    graph = PostgreSQLGraphTraversal(
+        settings.postgresql.connection_url,
+        timeout_seconds=settings.postgresql.timeout_seconds,
+    )
     registry = default_action_registry()
     validator = PipelineValidator(registry)
     engine = PipelineEngine(registry=registry, audit=audit)
@@ -114,6 +119,7 @@ def bootstrap(settings: SovereignFlowSettings) -> BootstrappedApplication:
             services[domain.name] = RagQueryService(
                 domain=domain,
                 retrieval=retrieval,
+                graph=graph,
                 model=model,
                 prompts=prompts,
                 pipeline=pipeline,
@@ -138,6 +144,7 @@ def bootstrap(settings: SovereignFlowSettings) -> BootstrappedApplication:
             ),
             audit,
             ingestion_repository,
+            graph,
             WeaviateHealthProbe(client),
             _GatewayHealthProbe(name="embeddings", gateway=embeddings),
             _GatewayHealthProbe(name="model", gateway=model),

@@ -8,6 +8,11 @@ from sovereignflow.domain import (
     Citation,
     DocumentChunk,
     DomainProfile,
+    GraphDirection,
+    GraphNodeRef,
+    GraphRelationship,
+    GraphTraversalProfile,
+    GraphTraversalRequest,
     PipelineDefinition,
     PipelineRun,
     PipelineRunStatus,
@@ -46,6 +51,150 @@ def test_domain_models_normalize_and_freeze_values() -> None:
     assert isinstance(request.filters, MappingProxyType)
 
 
+def test_graph_models_normalize_and_freeze_values(search_hit) -> None:
+    node = GraphNodeRef(" source ", " chunk ")
+    relationship = GraphRelationship(node, GraphNodeRef("target", "chunk"), " reference ")
+    profile = GraphTraversalProfile(
+        True,
+        2,
+        10,
+        GraphDirection.BOTH,
+        ("contains", "contains", "references"),
+    )
+    traversal = GraphTraversalRequest(
+        seeds=(search_hit,),
+        domain=" general ",
+        tenant_id=" tenant-a ",
+        max_depth=2,
+        max_nodes=10,
+        direction=GraphDirection.OUTGOING,
+        relationship_types=("references",),
+        allowed_acl_labels=("public", "public"),
+        max_classification_level=1,
+    )
+
+    assert node == GraphNodeRef("source", "chunk")
+    assert relationship.relationship_type == "reference"
+    assert isinstance(relationship.metadata, MappingProxyType)
+    assert profile.relationship_types == ("contains", "references")
+    assert traversal.allowed_acl_labels == ("public",)
+
+
+@pytest.mark.parametrize(
+    ("factory", "message"),
+    [
+        (lambda: GraphNodeRef("", "chunk"), "source_id"),
+        (
+            lambda: GraphRelationship(
+                GraphNodeRef("source", "chunk"),
+                GraphNodeRef("target", "chunk"),
+                "",
+            ),
+            "relationship_type",
+        ),
+        (
+            lambda: GraphTraversalProfile(True, 0, 1, GraphDirection.BOTH),
+            "max_depth",
+        ),
+        (
+            lambda: GraphTraversalProfile(True, 1, 0, GraphDirection.BOTH),
+            "max_nodes",
+        ),
+        (
+            lambda: GraphTraversalProfile(True, 1, 1, GraphDirection.BOTH, ("",)),
+            "relationship_types",
+        ),
+        (
+            lambda: GraphTraversalRequest(
+                (),
+                "domain",
+                "tenant",
+                1,
+                1,
+                GraphDirection.BOTH,
+                (),
+                (),
+                None,
+            ),
+            "seeds",
+        ),
+        (
+            lambda: GraphTraversalRequest(
+                (SearchHit(DocumentChunk("c", "d", "t", "s", "x"), 1, "x"),),
+                "domain",
+                "tenant",
+                0,
+                1,
+                GraphDirection.BOTH,
+                (),
+                (),
+                None,
+            ),
+            "max_depth",
+        ),
+        (
+            lambda: GraphTraversalRequest(
+                (SearchHit(DocumentChunk("c", "d", "t", "s", "x"), 1, "x"),),
+                "domain",
+                "tenant",
+                1,
+                0,
+                GraphDirection.BOTH,
+                (),
+                (),
+                None,
+            ),
+            "max_nodes",
+        ),
+        (
+            lambda: GraphTraversalRequest(
+                (SearchHit(DocumentChunk("c", "d", "t", "s", "x"), 1, "x"),),
+                "domain",
+                "tenant",
+                1,
+                1,
+                GraphDirection.BOTH,
+                (),
+                (),
+                -1,
+            ),
+            "classification",
+        ),
+        (
+            lambda: GraphTraversalRequest(
+                (SearchHit(DocumentChunk("c", "d", "t", "s", "x"), 1, "x"),),
+                "domain",
+                "tenant",
+                1,
+                1,
+                GraphDirection.BOTH,
+                ("",),
+                (),
+                None,
+            ),
+            "relationship_types",
+        ),
+        (
+            lambda: GraphTraversalRequest(
+                (SearchHit(DocumentChunk("c", "d", "t", "s", "x"), 1, "x"),),
+                "domain",
+                "tenant",
+                1,
+                1,
+                GraphDirection.BOTH,
+                (),
+                ("",),
+                None,
+            ),
+            "allowed_acl_labels",
+        ),
+    ],
+)
+def test_graph_models_reject_invalid_values(factory, message: str) -> None:
+    with pytest.raises(ValidationError, match=message):
+        factory()
+
+
 @pytest.mark.parametrize(
     ("factory", "message"),
     [
@@ -78,6 +227,7 @@ def test_domain_models_normalize_and_freeze_values() -> None:
                 "p",
                 False,
                 RetrievalProfile(SearchMode.HYBRID, 1, 1),
+                GraphTraversalProfile(False, 1, 1, GraphDirection.BOTH),
             ),
             "DomainProfile.name",
         ),
@@ -90,6 +240,7 @@ def test_domain_models_normalize_and_freeze_values() -> None:
                 "p",
                 False,
                 RetrievalProfile(SearchMode.HYBRID, 1, 1),
+                GraphTraversalProfile(False, 1, 1, GraphDirection.BOTH),
                 max_classification_level=-1,
             ),
             "max_classification",
@@ -103,6 +254,7 @@ def test_domain_models_normalize_and_freeze_values() -> None:
                 "p",
                 False,
                 RetrievalProfile(SearchMode.HYBRID, 1, 1),
+                GraphTraversalProfile(False, 1, 1, GraphDirection.BOTH),
                 allowed_acl_labels=("",),
             ),
             "allowed_acl_labels",

@@ -4,6 +4,7 @@ from collections.abc import Sequence
 from typing import Protocol
 
 from sovereignflow.domain import (
+    GraphTraversalRequest,
     IngestionCommand,
     IngestionJob,
     PipelineRun,
@@ -17,6 +18,12 @@ class RetrievalPort(Protocol):
     def search(self, request: SearchRequest) -> Sequence[SearchHit]: ...
 
     def healthcheck(self) -> None: ...
+
+
+class GraphTraversalPort(Protocol):
+    def expand(self, request: GraphTraversalRequest) -> Sequence[SearchHit]: ...
+
+    def check(self) -> None: ...
 
 
 class EmbeddingGatewayPort(Protocol):

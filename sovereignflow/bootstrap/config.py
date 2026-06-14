@@ -10,6 +10,8 @@ import yaml
 from sovereignflow.domain import (
     ConfigurationError,
     DomainProfile,
+    GraphDirection,
+    GraphTraversalProfile,
     RetrievalProfile,
     SearchMode,
 )
@@ -184,6 +186,7 @@ def _model_settings(raw: Any) -> ModelSettings:
 def _load_domain(path: Path) -> DomainProfile:
     raw = _read_yaml(path)
     retrieval = _mapping(raw, "retrieval")
+    graph = _mapping(raw, "graph")
     try:
         mode = SearchMode(_required(retrieval.get("mode"), "retrieval.mode").lower())
     except ValueError as exc:
@@ -195,6 +198,15 @@ def _load_domain(path: Path) -> DomainProfile:
     if not isinstance(labels, list):
         raise ConfigurationError("allowed_acl_labels must be a list")
     maximum = raw.get("max_classification_level")
+    relationship_types = graph.get("relationship_types")
+    if not isinstance(relationship_types, list):
+        raise ConfigurationError("graph.relationship_types must be a list")
+    try:
+        graph_direction = GraphDirection(
+            _required(graph.get("direction"), "graph.direction").lower()
+        )
+    except ValueError as exc:
+        raise ConfigurationError("graph.direction must be outgoing, incoming or both") from exc
     return DomainProfile(
         name=_required(raw.get("name"), "name"),
         description=str(raw.get("description") or "").strip(),
@@ -217,6 +229,13 @@ def _load_domain(path: Path) -> DomainProfile:
                 "retrieval.max_context_characters",
             ),
             filters=filters,
+        ),
+        graph=GraphTraversalProfile(
+            enabled=_required_bool(graph.get("enabled"), "graph.enabled"),
+            max_depth=_positive_int(graph.get("max_depth"), "graph.max_depth"),
+            max_nodes=_positive_int(graph.get("max_nodes"), "graph.max_nodes"),
+            direction=graph_direction,
+            relationship_types=tuple(str(item) for item in relationship_types),
         ),
     )
 

@@ -5,6 +5,7 @@ from dataclasses import replace
 import pytest
 from conftest import (
     StubAudit,
+    StubGraph,
     StubModel,
     StubPrompts,
     StubRetrieval,
@@ -157,6 +158,7 @@ def test_pipeline_engine_records_safe_known_and_unknown_failures(domain_profile)
         command=command,
         domain=domain_profile,
         retrieval=StubRetrieval(),
+        graph=StubGraph(),
         model=StubModel(),
         prompts=StubPrompts(),
     )
@@ -208,6 +210,7 @@ def test_pipeline_engine_enforces_runtime_step_limit(domain_profile) -> None:
         command=QueryCommand("request", "question", "general", "session"),
         domain=domain_profile,
         retrieval=StubRetrieval(),
+        graph=StubGraph(),
         model=StubModel(),
         prompts=StubPrompts(),
     )
@@ -241,6 +244,7 @@ def test_pipeline_engine_executes_explicit_route(domain_profile) -> None:
         command=QueryCommand("request", "question", "general", "session"),
         domain=domain_profile,
         retrieval=StubRetrieval(),
+        graph=StubGraph(),
         model=StubModel(),
         prompts=StubPrompts(),
     )
@@ -289,6 +293,7 @@ def test_pipeline_engine_rejects_invalid_route_decisions(
         command=QueryCommand("request", "question", "general", "session"),
         domain=domain_profile,
         retrieval=StubRetrieval(),
+        graph=StubGraph(),
         model=StubModel(),
         prompts=StubPrompts(),
     )

@@ -9,6 +9,10 @@ from sovereignflow.domain import (
     DependencyUnavailableError,
     DocumentChunk,
     DomainProfile,
+    GraphDirection,
+    GraphNodeRef,
+    GraphRelationship,
+    GraphTraversalProfile,
     IngestionCommand,
     IngestionJob,
     IngestionJobStatus,
@@ -29,6 +33,7 @@ def profile() -> DomainProfile:
         prompt_name="answer",
         allow_external_model=False,
         retrieval=RetrievalProfile(SearchMode.HYBRID, 5, 1000),
+        graph=GraphTraversalProfile(False, 1, 1, GraphDirection.BOTH),
         allowed_acl_labels=("public", "staff"),
         max_classification_level=2,
     )
@@ -213,6 +218,24 @@ def test_payload_hash_is_deterministic_and_validates_json_metadata() -> None:
 
     assert _payload_hash(original) == _payload_hash(reordered)
 
+    relationships = (
+        GraphRelationship(
+            GraphNodeRef("source-1", "chunk-1"),
+            GraphNodeRef("source-1", "chunk-2"),
+            "references",
+            {"weight": 1},
+        ),
+        GraphRelationship(
+            GraphNodeRef("source-1", "chunk-2"),
+            GraphNodeRef("external", "chunk-3"),
+            "contains",
+        ),
+    )
+    with_relationships = replace(original, relationships=relationships)
+    assert _payload_hash(with_relationships) == _payload_hash(
+        replace(with_relationships, relationships=tuple(reversed(relationships)))
+    )
+
     invalid = replace(original, metadata={"invalid": object()})
     with pytest.raises(ValidationError, match="valid JSON"):
         _payload_hash(invalid)
@@ -229,6 +252,46 @@ def test_ingestion_domain_models_reject_invalid_state() -> None:
         )
     with pytest.raises(ValidationError, match="Duplicate"):
         replace(base, chunks=(base.chunks[0], base.chunks[0]))
+    with pytest.raises(ValidationError, match="command source"):
+        replace(
+            base,
+            relationships=(
+                GraphRelationship(
+                    GraphNodeRef("other", "chunk-1"),
+                    GraphNodeRef("source-1", "chunk-2"),
+                    "references",
+                ),
+            ),
+        )
+    with pytest.raises(ValidationError, match="originate from an ingested"):
+        replace(
+            base,
+            relationships=(
+                GraphRelationship(
+                    GraphNodeRef("source-1", "missing"),
+                    GraphNodeRef("source-1", "chunk-2"),
+                    "references",
+                ),
+            ),
+        )
+    with pytest.raises(ValidationError, match="internal relationship target"):
+        replace(
+            base,
+            relationships=(
+                GraphRelationship(
+                    GraphNodeRef("source-1", "chunk-1"),
+                    GraphNodeRef("source-1", "missing"),
+                    "references",
+                ),
+            ),
+        )
+    duplicate = GraphRelationship(
+        GraphNodeRef("source-1", "chunk-1"),
+        GraphNodeRef("source-1", "chunk-2"),
+        "references",
+    )
+    with pytest.raises(ValidationError, match="Duplicate ingestion relationship"):
+        replace(base, relationships=(duplicate, duplicate))
     with pytest.raises(ValidationError, match="negative"):
         IngestionJob(
             job_id="job",

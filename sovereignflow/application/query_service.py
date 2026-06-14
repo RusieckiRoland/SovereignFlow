@@ -9,7 +9,7 @@ from sovereignflow.domain import (
 )
 
 from .pipeline import PipelineContext, PipelineEngine
-from .ports import ModelGatewayPort, PromptRepositoryPort, RetrievalPort
+from .ports import GraphTraversalPort, ModelGatewayPort, PromptRepositoryPort, RetrievalPort
 
 
 class RagQueryService:
@@ -18,6 +18,7 @@ class RagQueryService:
         *,
         domain: DomainProfile,
         retrieval: RetrievalPort,
+        graph: GraphTraversalPort,
         model: ModelGatewayPort,
         prompts: PromptRepositoryPort,
         pipeline: PipelineDefinition,
@@ -29,6 +30,7 @@ class RagQueryService:
             )
         self._domain = domain
         self._retrieval = retrieval
+        self._graph = graph
         self._model = model
         self._prompts = prompts
         self._pipeline = pipeline
@@ -50,6 +52,7 @@ class RagQueryService:
                 command=command,
                 domain=self._domain,
                 retrieval=self._retrieval,
+                graph=self._graph,
                 model=self._model,
                 prompts=self._prompts,
             ),

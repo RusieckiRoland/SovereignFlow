@@ -9,6 +9,7 @@ from typing import Protocol
 from sovereignflow.domain import (
     Citation,
     DomainProfile,
+    GraphTraversalRequest,
     PipelineDefinition,
     PipelineDefinitionError,
     PipelineExecutionError,
@@ -24,6 +25,7 @@ from sovereignflow.domain import (
 
 from .ports import (
     ExecutionAuditPort,
+    GraphTraversalPort,
     ModelGatewayPort,
     PromptRepositoryPort,
     RetrievalPort,
@@ -35,6 +37,7 @@ class PipelineContext:
     command: QueryCommand
     domain: DomainProfile
     retrieval: RetrievalPort
+    graph: GraphTraversalPort
     model: ModelGatewayPort
     prompts: PromptRepositoryPort
     normalized_query: str = ""
@@ -89,6 +92,36 @@ class RetrieveAction:
             )
         )
         _verify_retrieval_boundary(domain, context.hits)
+        return None
+
+
+class ExpandGraphAction:
+    action_id = "expand_graph"
+    behavior_version = "1.0"
+    requires = frozenset({"hits", "domain"})
+    provides = frozenset({"hits"})
+
+    def execute(self, context: PipelineContext) -> str | None:
+        profile = context.domain.graph
+        if not profile.enabled or not context.hits:
+            return None
+        expanded = tuple(
+            context.graph.expand(
+                GraphTraversalRequest(
+                    seeds=context.hits,
+                    domain=context.domain.name,
+                    tenant_id=context.domain.tenant_id,
+                    max_depth=profile.max_depth,
+                    max_nodes=profile.max_nodes,
+                    direction=profile.direction,
+                    relationship_types=profile.relationship_types,
+                    allowed_acl_labels=context.domain.allowed_acl_labels,
+                    max_classification_level=context.domain.max_classification_level,
+                )
+            )
+        )
+        _verify_retrieval_boundary(context.domain, expanded)
+        context.hits = (*context.hits, *expanded)
         return None
 
 
@@ -159,6 +192,7 @@ def default_action_registry() -> ActionRegistry:
         (
             NormalizeQueryAction(),
             RetrieveAction(),
+            ExpandGraphAction(),
             BuildContextAction(),
             CallModelAction(),
             FinalizeAction(),

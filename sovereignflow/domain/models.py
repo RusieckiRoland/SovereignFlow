@@ -26,6 +26,38 @@ class SearchMode(StrEnum):
     HYBRID = "hybrid"
 
 
+class GraphDirection(StrEnum):
+    OUTGOING = "outgoing"
+    INCOMING = "incoming"
+    BOTH = "both"
+
+
+@dataclass(frozen=True)
+class GraphNodeRef:
+    source_id: str
+    chunk_id: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "source_id", _required(self.source_id, "GraphNodeRef.source_id"))
+        object.__setattr__(self, "chunk_id", _required(self.chunk_id, "GraphNodeRef.chunk_id"))
+
+
+@dataclass(frozen=True)
+class GraphRelationship:
+    from_node: GraphNodeRef
+    to_node: GraphNodeRef
+    relationship_type: str
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "relationship_type",
+            _required(self.relationship_type, "GraphRelationship.relationship_type"),
+        )
+        object.__setattr__(self, "metadata", _immutable_mapping(self.metadata))
+
+
 @dataclass(frozen=True)
 class DocumentChunk:
     chunk_id: str
@@ -77,6 +109,36 @@ class RetrievalProfile:
 
 
 @dataclass(frozen=True)
+class GraphTraversalProfile:
+    enabled: bool
+    max_depth: int
+    max_nodes: int
+    direction: GraphDirection
+    relationship_types: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.max_depth < 1:
+            raise ValidationError("GraphTraversalProfile.max_depth must be greater than zero")
+        if self.max_nodes < 1:
+            raise ValidationError("GraphTraversalProfile.max_nodes must be greater than zero")
+        object.__setattr__(
+            self,
+            "relationship_types",
+            tuple(
+                sorted(
+                    {
+                        _required(
+                            relationship_type,
+                            "GraphTraversalProfile.relationship_types[]",
+                        )
+                        for relationship_type in self.relationship_types
+                    }
+                )
+            ),
+        )
+
+
+@dataclass(frozen=True)
 class DomainProfile:
     name: str
     description: str
@@ -85,6 +147,7 @@ class DomainProfile:
     prompt_name: str
     allow_external_model: bool
     retrieval: RetrievalProfile
+    graph: GraphTraversalProfile
     pipeline_name: str = "default"
     disclaimer: str = ""
     allowed_acl_labels: tuple[str, ...] = ()
@@ -150,6 +213,64 @@ class SearchHit:
             self,
             "score_type",
             _required(self.score_type, "SearchHit.score_type"),
+        )
+
+
+@dataclass(frozen=True)
+class GraphTraversalRequest:
+    seeds: tuple[SearchHit, ...]
+    domain: str
+    tenant_id: str
+    max_depth: int
+    max_nodes: int
+    direction: GraphDirection
+    relationship_types: tuple[str, ...]
+    allowed_acl_labels: tuple[str, ...]
+    max_classification_level: int | None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "domain", _required(self.domain, "GraphTraversalRequest.domain"))
+        object.__setattr__(
+            self,
+            "tenant_id",
+            _required(self.tenant_id, "GraphTraversalRequest.tenant_id"),
+        )
+        if not self.seeds:
+            raise ValidationError("GraphTraversalRequest.seeds cannot be empty")
+        if self.max_depth < 1:
+            raise ValidationError("GraphTraversalRequest.max_depth must be greater than zero")
+        if self.max_nodes < 1:
+            raise ValidationError("GraphTraversalRequest.max_nodes must be greater than zero")
+        if self.max_classification_level is not None and self.max_classification_level < 0:
+            raise ValidationError(
+                "GraphTraversalRequest.max_classification_level cannot be negative"
+            )
+        object.__setattr__(
+            self,
+            "relationship_types",
+            tuple(
+                sorted(
+                    {
+                        _required(
+                            relationship_type,
+                            "GraphTraversalRequest.relationship_types[]",
+                        )
+                        for relationship_type in self.relationship_types
+                    }
+                )
+            ),
+        )
+        object.__setattr__(
+            self,
+            "allowed_acl_labels",
+            tuple(
+                sorted(
+                    {
+                        _required(label, "GraphTraversalRequest.allowed_acl_labels[]")
+                        for label in self.allowed_acl_labels
+                    }
+                )
+            ),
         )
 
 
@@ -341,6 +462,7 @@ class IngestionCommand:
     source_id: str
     source_version: str
     chunks: tuple[DocumentChunk, ...]
+    relationships: tuple[GraphRelationship, ...] = ()
     source_uri: str | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
@@ -372,6 +494,31 @@ class IngestionCommand:
             if chunk.chunk_id in chunk_ids:
                 raise ValidationError(f"Duplicate ingestion chunk id: {chunk.chunk_id}")
             chunk_ids.add(chunk.chunk_id)
+        relationship_keys: set[tuple[str, str, str, str, str]] = set()
+        for relationship in self.relationships:
+            if relationship.from_node.source_id != self.source_id:
+                raise ValidationError(
+                    "Every ingestion relationship must originate from the command source"
+                )
+            if relationship.from_node.chunk_id not in chunk_ids:
+                raise ValidationError(
+                    "Every ingestion relationship must originate from an ingested chunk"
+                )
+            if (
+                relationship.to_node.source_id == self.source_id
+                and relationship.to_node.chunk_id not in chunk_ids
+            ):
+                raise ValidationError("An internal relationship target must be an ingested chunk")
+            key = (
+                relationship.from_node.source_id,
+                relationship.from_node.chunk_id,
+                relationship.to_node.source_id,
+                relationship.to_node.chunk_id,
+                relationship.relationship_type,
+            )
+            if key in relationship_keys:
+                raise ValidationError("Duplicate ingestion relationship")
+            relationship_keys.add(key)
         object.__setattr__(self, "metadata", _immutable_mapping(self.metadata))
 
 

@@ -14,7 +14,8 @@ SovereignFlow owns reusable RAG mechanics:
 - versioned YAML pipeline definitions,
 - action contracts and deterministic routing,
 - durable execution history and step audit,
-- versioned, idempotent document ingestion.
+- versioned, idempotent document ingestion,
+- bounded traversal of neutral document relationships.
 
 Domain projects own source semantics and business rules.
 
@@ -88,6 +89,32 @@ The application then requests batch embeddings and replaces the source in the co
 PostgreSQL and Weaviate do not support one distributed transaction. SovereignFlow therefore uses an explicit job state machine and idempotent source replacement rather than pretending that cross-database atomicity exists.
 
 Weaviate collection schemas are created or verified during startup. Any property or type drift is a startup failure; there is no best-effort schema fallback.
+
+## Graph relationships
+
+Graph relationships are domain-neutral links between document chunks. They are stored in PostgreSQL and owned by the version of the source that declared them.
+
+This ownership model provides deterministic activation:
+
+1. ingestion stores chunks and relationships in one PostgreSQL transaction;
+2. Weaviate indexes the source version;
+3. PostgreSQL advances the current source pointer;
+4. only relationships owned by the current version participate in traversal.
+
+Cross-source targets must already exist in the current graph. Internal targets must belong to the same ingestion command. Duplicate relationships and dangling targets are rejected.
+
+The graph adapter does not load the entire tenant graph into memory. It performs bounded breadth-first expansion one depth level at a time. Every query is constrained by:
+
+- tenant and domain;
+- traversal direction;
+- relationship-type allowlist;
+- maximum depth;
+- maximum number of expanded nodes;
+- current source versions;
+- ACL subset policy;
+- classification ceiling.
+
+The pipeline performs vector or keyword retrieval first. Retrieved chunks become graph seeds, and the explicit `expand_graph` action appends permitted related chunks before context construction. Graph evidence retains depth and relationship-path metadata.
 
 ## Security rule
 

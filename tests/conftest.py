@@ -13,6 +13,8 @@ from sovereignflow.application import PipelineEngine, RagQueryService, default_a
 from sovereignflow.domain import (
     DocumentChunk,
     DomainProfile,
+    GraphDirection,
+    GraphTraversalProfile,
     PipelineDefinition,
     PipelineStepDefinition,
     RetrievalProfile,
@@ -34,6 +36,22 @@ class StubRetrieval:
     def healthcheck(self) -> None:
         if not self.healthy:
             raise RuntimeError("unhealthy")
+
+
+class StubGraph:
+    name = "graph_traversal"
+
+    def __init__(self, hits: tuple[SearchHit, ...] = ()) -> None:
+        self.hits = hits
+        self.requests = []
+        self.checked = 0
+
+    def expand(self, request):
+        self.requests.append(request)
+        return self.hits
+
+    def check(self) -> None:
+        self.checked += 1
 
 
 class StubModel:
@@ -90,6 +108,7 @@ def default_pipeline() -> PipelineDefinition:
     action_ids = (
         "normalize_query",
         "retrieve",
+        "expand_graph",
         "build_context",
         "call_model",
         "finalize",
@@ -119,12 +138,14 @@ def build_query_service(
     retrieval,
     model,
     prompts,
+    graph: StubGraph | None = None,
     audit: StubAudit | None = None,
 ) -> RagQueryService:
     selected_audit = audit or StubAudit()
     return RagQueryService(
         domain=domain,
         retrieval=retrieval,
+        graph=graph or StubGraph(),
         model=model,
         prompts=prompts,
         pipeline=default_pipeline(),
@@ -154,6 +175,13 @@ def domain_profile() -> DomainProfile:
             top_k=3,
             max_context_characters=500,
             filters={"status": "active"},
+        ),
+        graph=GraphTraversalProfile(
+            enabled=True,
+            max_depth=2,
+            max_nodes=10,
+            direction=GraphDirection.BOTH,
+            relationship_types=("references",),
         ),
     )
 

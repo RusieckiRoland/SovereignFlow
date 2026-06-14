@@ -11,6 +11,11 @@ from .domain import (
     DocumentChunk,
     DomainNotFoundError,
     DomainProfile,
+    GraphDirection,
+    GraphNodeRef,
+    GraphRelationship,
+    GraphTraversalProfile,
+    GraphTraversalRequest,
     IngestionCommand,
     IngestionError,
     IngestionJob,
@@ -43,6 +48,11 @@ __all__ = [
     "DocumentIngestionService",
     "DomainNotFoundError",
     "DomainProfile",
+    "GraphDirection",
+    "GraphNodeRef",
+    "GraphRelationship",
+    "GraphTraversalProfile",
+    "GraphTraversalRequest",
     "IngestionCommand",
     "IngestionError",
     "IngestionJob",
@@ -70,4 +80,4 @@ __all__ = [
     "ValidationError",
 ]
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"

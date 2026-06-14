@@ -1,4 +1,5 @@
 from .audit import PostgreSQLExecutionAudit
+from .graph import PostgreSQLGraphTraversal
 from .http_gateways import (
     EmbeddingEndpoint,
     ModelEndpoint,
@@ -24,6 +25,7 @@ __all__ = [
     "OpenAIEmbeddingGateway",
     "OpenAIModelGateway",
     "PostgreSQLExecutionAudit",
+    "PostgreSQLGraphTraversal",
     "PostgreSQLHealthProbe",
     "PostgreSQLIngestionRepository",
     "PostgreSQLMigrationRunner",

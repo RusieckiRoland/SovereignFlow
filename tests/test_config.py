@@ -35,6 +35,13 @@ def valid_files(tmp_path: Path) -> tuple[Path, dict]:
                     "max_context_characters": 1000,
                     "filters": {"status": "active"},
                 },
+                "graph": {
+                    "enabled": True,
+                    "max_depth": 2,
+                    "max_nodes": 20,
+                    "direction": "both",
+                    "relationship_types": ["references"],
+                },
             }
         ),
         encoding="utf-8",
@@ -103,6 +110,7 @@ def test_load_settings_resolves_complete_configuration(tmp_path: Path) -> None:
     assert settings.selected_model.api_key == "model-secret"
     assert settings.embeddings.api_key == "embed-secret"
     assert settings.domains[0].retrieval.mode == SearchMode.HYBRID
+    assert settings.domains[0].graph.max_depth == 2
     assert settings.prompts_root == tmp_path / "prompts"
 
 
@@ -211,6 +219,22 @@ def test_duplicate_domain_names_are_rejected(tmp_path: Path) -> None:
         (
             lambda raw: raw["retrieval"].update(top_k=0),
             "retrieval.top_k",
+        ),
+        (
+            lambda raw: raw["graph"].update(direction="sideways"),
+            "graph.direction",
+        ),
+        (
+            lambda raw: raw["graph"].update(relationship_types="references"),
+            "graph.relationship_types",
+        ),
+        (
+            lambda raw: raw["graph"].update(enabled="true"),
+            "graph.enabled",
+        ),
+        (
+            lambda raw: raw["graph"].update(max_depth=0),
+            "graph.max_depth",
         ),
     ],
 )

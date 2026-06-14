@@ -9,6 +9,8 @@ from sovereignflow.domain import (
     ConflictError,
     DependencyUnavailableError,
     DocumentChunk,
+    GraphNodeRef,
+    GraphRelationship,
     IngestionCommand,
     IngestionError,
     IngestionJob,
@@ -128,6 +130,38 @@ class PostgreSQLIngestionRepository:
                                     _json(chunk.metadata),
                                     list(chunk.acl_labels),
                                     chunk.classification_level,
+                                ),
+                            )
+                        for relationship in command.relationships:
+                            if (
+                                relationship.to_node.source_id != command.source_id
+                                and not self._target_exists(cursor, command, relationship)
+                            ):
+                                raise ConflictError(
+                                    "Relationship target does not exist in the current graph"
+                                )
+                            cursor.execute(
+                                """
+                                INSERT INTO graph.relationships (
+                                    tenant_id, domain, owner_source_id, owner_source_version,
+                                    from_source_id, from_chunk_id, to_source_id, to_chunk_id,
+                                    relationship_type, metadata_json
+                                )
+                                VALUES (
+                                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb
+                                )
+                                """,
+                                (
+                                    command.tenant_id,
+                                    command.domain,
+                                    command.source_id,
+                                    command.source_version,
+                                    relationship.from_node.source_id,
+                                    relationship.from_node.chunk_id,
+                                    relationship.to_node.source_id,
+                                    relationship.to_node.chunk_id,
+                                    relationship.relationship_type,
+                                    _json(relationship.metadata),
                                 ),
                             )
                     cursor.execute(
@@ -292,6 +326,27 @@ class PostgreSQLIngestionRepository:
             )
             for chunk in cursor.fetchall()
         )
+        cursor.execute(
+            """
+            SELECT from_source_id, from_chunk_id, to_source_id, to_chunk_id,
+                   relationship_type, metadata_json
+            FROM graph.relationships
+            WHERE tenant_id = %s AND domain = %s
+              AND owner_source_id = %s AND owner_source_version = %s
+            ORDER BY from_source_id, from_chunk_id, to_source_id, to_chunk_id,
+                     relationship_type
+            """,
+            (row[6], row[5], row[7], row[8]),
+        )
+        relationships = tuple(
+            GraphRelationship(
+                from_node=GraphNodeRef(str(item[0]), str(item[1])),
+                to_node=GraphNodeRef(str(item[2]), str(item[3])),
+                relationship_type=str(item[4]),
+                metadata=_mapping(item[5]),
+            )
+            for item in cursor.fetchall()
+        )
         return IngestionJob(
             job_id=str(row[0]),
             payload_hash=str(row[1]),
@@ -306,8 +361,37 @@ class PostgreSQLIngestionRepository:
                 source_uri=row[9],
                 metadata=_mapping(row[10]),
                 chunks=chunks,
+                relationships=relationships,
             ),
         )
+
+    @staticmethod
+    def _target_exists(cursor: Any, command: IngestionCommand, relationship) -> bool:
+        cursor.execute(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM ingestion.sources source
+                JOIN ingestion.chunks chunk
+                  ON chunk.tenant_id = source.tenant_id
+                 AND chunk.domain = source.domain
+                 AND chunk.source_id = source.source_id
+                 AND chunk.source_version = source.current_version
+                WHERE source.tenant_id = %s
+                  AND source.domain = %s
+                  AND source.source_id = %s
+                  AND chunk.chunk_id = %s
+            )
+            """,
+            (
+                command.tenant_id,
+                command.domain,
+                relationship.to_node.source_id,
+                relationship.to_node.chunk_id,
+            ),
+        )
+        row = cursor.fetchone()
+        return bool(row and row[0])
 
     def _transition(
         self,

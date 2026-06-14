@@ -24,6 +24,8 @@ from sovereignflow.bootstrap.config import (
 from sovereignflow.domain import (
     DependencyUnavailableError,
     DomainProfile,
+    GraphDirection,
+    GraphTraversalProfile,
     RetrievalProfile,
     SearchMode,
 )
@@ -104,6 +106,10 @@ class IngestionRepository(Healthy):
         self.checked += 1
 
 
+class GraphTraversal(IngestionRepository):
+    name = "graph_traversal"
+
+
 class CollectionMigrator:
     def __init__(self, client) -> None:
         self.client = client
@@ -143,6 +149,7 @@ def settings(tmp_path: Path) -> SovereignFlowSettings:
                 "answer",
                 False,
                 RetrievalProfile(SearchMode.BM25, 1, 100),
+                GraphTraversalProfile(False, 1, 1, GraphDirection.BOTH),
             ),
         ),
     )
@@ -181,6 +188,10 @@ def test_bootstrap_builds_and_validates_complete_application(monkeypatch, tmp_pa
     monkeypatch.setattr(
         "sovereignflow.bootstrap.application.PostgreSQLIngestionRepository",
         IngestionRepository,
+    )
+    monkeypatch.setattr(
+        "sovereignflow.bootstrap.application.PostgreSQLGraphTraversal",
+        GraphTraversal,
     )
     monkeypatch.setattr(
         "sovereignflow.bootstrap.application.WeaviateCollectionMigrator",
@@ -249,6 +260,10 @@ def test_bootstrap_closes_client_when_construction_fails(monkeypatch, tmp_path) 
     monkeypatch.setattr(
         "sovereignflow.bootstrap.application.PostgreSQLIngestionRepository",
         IngestionRepository,
+    )
+    monkeypatch.setattr(
+        "sovereignflow.bootstrap.application.PostgreSQLGraphTraversal",
+        GraphTraversal,
     )
     monkeypatch.setattr(
         "sovereignflow.bootstrap.application.WeaviateCollectionMigrator",

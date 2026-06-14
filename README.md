@@ -12,6 +12,7 @@ It is extracted from the architectural lessons of LocalAI-RAG, but it is not a c
 - **Evidence before answers** — responses retain citations and source metadata.
 - **PostgreSQL-backed execution audit** — pipeline runs, completed steps, results, and safe failures are stored durably.
 - **Transactional document ingestion** — source versions, chunks, idempotency keys, and indexing jobs are committed atomically.
+- **Versioned graph relationships** — document relations follow source versions and are traversed with explicit safety limits.
 - **Weaviate for retrieval** — semantic, keyword, and hybrid search use generic document chunks.
 - **Domain behavior through profiles** — prompts, disclaimers, collections, filters, and retrieval defaults live outside the core.
 - **Versioned pipeline behavior** — YAML steps pin action behavior versions and are validated before startup.
@@ -60,6 +61,28 @@ The ingestion service:
 5. marks the PostgreSQL source pointer as current only after indexing succeeds.
 
 Failed indexing jobs remain explicit and can be retried by job identifier. No hidden fallback or silent data loss is permitted.
+
+## Graph relationships
+
+Domain importers may attach neutral `GraphRelationship` records to an ingestion command. A relationship connects two document chunks using source and chunk identifiers plus a domain-defined relationship type.
+
+Relationships:
+
+- belong to the ingested source version;
+- become active only when that source version becomes current;
+- require an existing target chunk for cross-source links;
+- are persisted in PostgreSQL, not hidden inside vector metadata;
+- are included in the canonical ingestion hash.
+
+The `expand_graph` pipeline action performs bounded breadth-first traversal after vector or keyword retrieval. Domain configuration explicitly controls:
+
+- whether expansion is enabled;
+- outgoing, incoming, or bidirectional traversal;
+- maximum depth;
+- maximum number of added nodes;
+- an optional relationship-type allowlist.
+
+Each traversal query is tenant- and domain-scoped. Target chunks are loaded only from current source versions and must satisfy ACL and classification policies before entering model context.
 
 ## Local/external model selection
 
@@ -353,16 +376,17 @@ python -m compileall -q sovereignflow tests
 
 ## Current limitations
 
-Stage 3 intentionally does not yet include:
+Stage 4 intentionally does not yet include:
 
-- graph relationship storage and traversal,
 - authenticated execution-history API,
 - domain-specific PostgreSQL schemas,
 - domain synchronization workers,
 - source-specific parsing or chunking,
 - a public ingestion endpoint without authenticated service identity,
+- dedicated graph databases or graph-query languages,
+- asynchronous ingestion workers,
 - model or embedding fallbacks.
 
 ## Status
 
-Stage 3 is complete: the reusable foundation now includes versioned and idempotent document ingestion, PostgreSQL-backed job state, batch embeddings, exact Weaviate collection migrations, and source replacement verified against real PostgreSQL and Weaviate services. The next milestones are neutral graph relationships, observability, and the first domain package.
+Stage 4 is complete: the reusable foundation now includes versioned graph relationships, bounded PostgreSQL traversal, relationship allowlists, direction controls, graph-aware pipeline execution, and security-filtered graph evidence. The next milestones are observability, authenticated operational APIs, and the first domain package.

@@ -9,6 +9,7 @@ from .pipeline import (
 from .ports import (
     EmbeddingGatewayPort,
     ExecutionAuditPort,
+    GraphTraversalPort,
     HealthProbe,
     IngestionRepositoryPort,
     ModelGatewayPort,
@@ -23,6 +24,7 @@ __all__ = [
     "DocumentIngestionService",
     "EmbeddingGatewayPort",
     "ExecutionAuditPort",
+    "GraphTraversalPort",
     "HealthProbe",
     "IngestionRepositoryPort",
     "ModelGatewayPort",
