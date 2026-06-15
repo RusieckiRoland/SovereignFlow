@@ -10,8 +10,10 @@ from sovereignflow.application import (
     DocumentIngestionService,
     HealthProbe,
     OperationsService,
+    PipelineAuthorizationService,
     PipelineEngine,
     PipelineValidator,
+    PolicyAdministrationService,
     RagQueryService,
     default_action_registry,
 )
@@ -20,20 +22,24 @@ from sovereignflow.infrastructure import (
     EmbeddingEndpoint,
     FilePromptRepository,
     ModelEndpoint,
+    OidcJwtAuthenticator,
+    OidcSettings,
     OpenAIEmbeddingGateway,
     OpenAIModelGateway,
+    PostgreSQLAccessPolicyRepository,
     PostgreSQLExecutionAudit,
     PostgreSQLGraphTraversal,
     PostgreSQLHealthProbe,
     PostgreSQLIngestionRepository,
     PostgreSQLMigrationRunner,
+    PostgreSQLSecurityDecisionAudit,
     WeaviateCollectionMigrator,
     WeaviateHealthProbe,
     WeaviateRetrievalAdapter,
     WeaviateVectorIndex,
     YamlPipelineRepository,
 )
-from sovereignflow.interfaces import QueryDispatcher, create_app
+from sovereignflow.interfaces import QueryDispatcher, WebClientConfiguration, create_app
 
 from .config import SovereignFlowSettings
 
@@ -58,6 +64,24 @@ class BootstrappedApplication:
 
 
 def bootstrap(settings: SovereignFlowSettings) -> BootstrappedApplication:
+    identity = settings.identity_provider
+    authenticator = OidcJwtAuthenticator(
+        OidcSettings(
+            issuer=identity.issuer,
+            audience=identity.audience,
+            jwks_url=identity.jwks_url,
+            algorithms=identity.algorithms,
+            timeout_seconds=identity.timeout_seconds,
+            cache_ttl_seconds=identity.cache_ttl_seconds,
+            tenant_claim=identity.tenant_claim,
+            roles_claim=identity.roles_claim,
+            groups_claim=identity.groups_claim,
+            acl_claim=identity.acl_claim,
+            classification_claim=identity.classification_claim,
+            external_model_claim=identity.external_model_claim,
+            diagnostic_claim=identity.diagnostic_claim,
+        )
+    )
     embeddings = OpenAIEmbeddingGateway(
         EmbeddingEndpoint(
             name=settings.embeddings.name,
@@ -98,19 +122,21 @@ def bootstrap(settings: SovereignFlowSettings) -> BootstrappedApplication:
         settings.postgresql.connection_url,
         timeout_seconds=settings.postgresql.timeout_seconds,
     )
+    access_policies = PostgreSQLAccessPolicyRepository(
+        settings.postgresql.connection_url,
+        timeout_seconds=settings.postgresql.timeout_seconds,
+    )
     registry = default_action_registry()
     validator = PipelineValidator(registry)
     engine = PipelineEngine(registry=registry, audit=audit)
     client = _connect_weaviate(settings)
     try:
-        services: dict[str, RagQueryService] = {}
+        services: dict[tuple[str, str], RagQueryService] = {}
         ingestion_services: dict[str, DocumentIngestionService] = {}
         retrieval_probes: list[HealthProbe] = []
         collection_migrator = WeaviateCollectionMigrator(client)
         vector_index = WeaviateVectorIndex(client=client, embeddings=embeddings)
         for domain in settings.domains:
-            pipeline = pipelines.load(domain.pipeline_name)
-            validator.validate(pipeline)
             collection_migrator.ensure(domain.collection)
             retrieval = WeaviateRetrievalAdapter(
                 client=client,
@@ -119,15 +145,18 @@ def bootstrap(settings: SovereignFlowSettings) -> BootstrappedApplication:
             )
             retrieval.healthcheck()
             prompts.load(domain.prompt_name)
-            services[domain.name] = RagQueryService(
-                domain=domain,
-                retrieval=retrieval,
-                graph=graph,
-                model=model,
-                prompts=prompts,
-                pipeline=pipeline,
-                engine=engine,
-            )
+            for pipeline_name in domain.allowed_pipeline_names:
+                pipeline = pipelines.load(pipeline_name)
+                validator.validate(pipeline)
+                services[(domain.name, pipeline_name)] = RagQueryService(
+                    domain=domain,
+                    retrieval=retrieval,
+                    graph=graph,
+                    model=model,
+                    prompts=prompts,
+                    pipeline=pipeline,
+                    engine=engine,
+                )
             ingestion_services[domain.name] = DocumentIngestionService(
                 domain=domain,
                 repository=ingestion_repository,
@@ -148,6 +177,7 @@ def bootstrap(settings: SovereignFlowSettings) -> BootstrappedApplication:
             audit,
             ingestion_repository,
             graph,
+            access_policies,
             WeaviateHealthProbe(client),
             _GatewayHealthProbe(name="embeddings", gateway=embeddings),
             _GatewayHealthProbe(name="model", gateway=model),
@@ -157,7 +187,19 @@ def bootstrap(settings: SovereignFlowSettings) -> BootstrappedApplication:
             probe.check()
         application = BootstrappedApplication(
             app=create_app(
-                QueryDispatcher(services),
+                QueryDispatcher(
+                    services,
+                    PipelineAuthorizationService(
+                        access_policies,
+                        PostgreSQLSecurityDecisionAudit(
+                            settings.postgresql.connection_url,
+                            timeout_seconds=settings.postgresql.timeout_seconds,
+                        ),
+                    ),
+                    default_pipelines={
+                        domain.name: domain.pipeline_name for domain in settings.domains
+                    },
+                ),
                 probes,
                 OperationsService(
                     audit=audit,
@@ -165,6 +207,23 @@ def bootstrap(settings: SovereignFlowSettings) -> BootstrappedApplication:
                     ingestion_services=ingestion_services,
                 ),
                 settings.admin.api_key,
+                authenticator,
+                (
+                    WebClientConfiguration(
+                        client_id=settings.web_client.client_id,
+                        authorization_url=settings.web_client.authorization_url,
+                        token_url=settings.web_client.token_url,
+                        logout_url=settings.web_client.logout_url,
+                    )
+                    if settings.web_client is not None
+                    else None
+                ),
+                PolicyAdministrationService(
+                    access_policies,
+                    domain_pipelines={
+                        domain.name: domain.allowed_pipeline_names for domain in settings.domains
+                    },
+                ),
             ),
             weaviate_client=client,
             ingestion_services=ingestion_services,

@@ -10,6 +10,27 @@ postgresql:
 admin:
   api_key_env: SOVEREIGNFLOW_ADMIN_API_KEY
 
+identity_provider:
+  issuer: https://identity.example.test
+  audience: sovereignflow
+  jwks_url: https://identity.example.test/.well-known/jwks.json
+  algorithms: [RS256]
+  timeout_seconds: 5
+  cache_ttl_seconds: 300
+  tenant_claim: tenant_id
+  roles_claim: roles
+  groups_claim: groups
+  acl_claim: acl_labels
+  classification_claim: max_classification_level
+  external_model_claim: allow_external_model
+  diagnostic_claim: sovereignflow_diagnostics
+
+web_client:
+  client_id: sovereignflow-web-client
+  authorization_url: http://127.0.0.1:28090/realms/sovereignflow/protocol/openid-connect/auth
+  token_url: http://127.0.0.1:28090/realms/sovereignflow/protocol/openid-connect/token
+  logout_url: http://127.0.0.1:28090/realms/sovereignflow/protocol/openid-connect/logout
+
 selected_model: local-default
 models:
   - name: local-default

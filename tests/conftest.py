@@ -11,6 +11,7 @@ import pytest
 
 from sovereignflow.application import PipelineEngine, RagQueryService, default_action_registry
 from sovereignflow.domain import (
+    AuthorizationContext,
     DocumentChunk,
     DomainProfile,
     GraphDirection,
@@ -61,6 +62,14 @@ class StubModel:
         self.answer = answer
         self.calls = []
         self.healthy = True
+
+    @property
+    def name(self) -> str:
+        return "stub-provider"
+
+    @property
+    def model_id(self) -> str:
+        return "stub-model"
 
     @property
     def scope(self) -> str:
@@ -128,6 +137,31 @@ class StubOperations:
 
     def retry_ingestion(self, job_id: str, *, tenant_id: str):
         return {"job_id": job_id, "tenant_id": tenant_id, "status": "completed"}
+
+
+def authorization_context(**overrides) -> AuthorizationContext:
+    values = {
+        "subject": "user-1",
+        "tenant_id": "tenant-a",
+        "roles": ("user",),
+        "groups": ("group-a",),
+        "acl_labels": ("public",),
+        "max_classification_level": 1,
+        "allow_external_model": False,
+        "diagnostic_access": True,
+    }
+    values.update(overrides)
+    return AuthorizationContext(**values)
+
+
+class StubAuthenticator:
+    def __init__(self, context: AuthorizationContext | None = None) -> None:
+        self.context = context or authorization_context()
+        self.tokens: list[str] = []
+
+    def authenticate(self, access_token: str) -> AuthorizationContext:
+        self.tokens.append(access_token)
+        return self.context
 
 
 def default_pipeline() -> PipelineDefinition:
@@ -201,6 +235,7 @@ def domain_profile() -> DomainProfile:
             top_k=3,
             max_context_characters=500,
             filters={"status": "active"},
+            allowed_filter_fields=("country", "status"),
         ),
         graph=GraphTraversalProfile(
             enabled=True,

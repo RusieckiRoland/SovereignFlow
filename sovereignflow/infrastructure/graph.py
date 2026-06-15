@@ -225,7 +225,10 @@ class PostgreSQLGraphTraversal:
             WHERE source.tenant_id = %s
               AND source.domain = %s
               AND concat_ws(chr(31), chunk.source_id, chunk.chunk_id) = ANY(%s::text[])
-              AND chunk.acl_labels <@ %s::text[]
+              AND (
+                  cardinality(chunk.acl_labels) = 0
+                  OR chunk.acl_labels && %s::text[]
+              )
               AND (%s::integer IS NULL OR chunk.classification_level <= %s)
             ORDER BY chunk.source_id, chunk.chunk_id
             """,

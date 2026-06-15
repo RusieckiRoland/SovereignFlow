@@ -25,7 +25,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--results", type=Path, required=True)
     run_parser.add_argument("--endpoint", required=True)
     run_parser.add_argument("--timeout", type=float, default=30.0)
-    run_parser.add_argument("--diagnostic-key-env")
+    run_parser.add_argument("--access-token-env", required=True)
     run_parser.add_argument("--overwrite", action="store_true")
 
     analyze_parser = subparsers.add_parser("analyze", help="Analyze saved query results.")
@@ -46,15 +46,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         if args.command == "run":
-            diagnostic_key = _diagnostic_key(args.diagnostic_key_env)
+            access_token = _required_environment_value(args.access_token_env)
             count = execute_queries(
                 ExecutionConfig(
                     queries_path=args.queries,
                     output_path=args.results,
                     endpoint=args.endpoint,
                     timeout_seconds=args.timeout,
+                    access_token=access_token,
                     overwrite=args.overwrite,
-                    diagnostic_key=diagnostic_key,
                 )
             )
             LOGGER.info("Executed %d queries", count)
@@ -82,9 +82,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
 
 
-def _diagnostic_key(environment_name: str | None) -> str | None:
-    if environment_name is None:
-        return None
+def _required_environment_value(environment_name: str) -> str:
     value = os.environ.get(environment_name)
     if not value:
         raise EvaluationError(f"Environment variable is missing or empty: {environment_name}")

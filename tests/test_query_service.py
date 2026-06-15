@@ -9,6 +9,7 @@ from conftest import (
     StubModel,
     StubPrompts,
     StubRetrieval,
+    authorization_context,
     build_query_service,
 )
 
@@ -26,6 +27,7 @@ def command(domain: str = "general") -> QueryCommand:
         query="  evidence   question ",
         domain=domain,
         session_id="session-1",
+        authorization=authorization_context(),
         filters={"country": "PL", "status": "inactive"},
     )
 
@@ -216,6 +218,107 @@ def test_query_domain_must_match_service(domain_profile) -> None:
 
     with pytest.raises(PolicyViolationError, match="does not match"):
         service.execute(command("other"))
+
+
+def test_query_security_is_derived_from_authenticated_user(
+    domain_profile,
+    search_hit,
+) -> None:
+    retrieval = StubRetrieval((search_hit,))
+    restricted = command()
+    restricted = replace(
+        restricted,
+        authorization=authorization_context(
+            acl_labels=("public", "unknown"),
+            max_classification_level=0,
+        ),
+    )
+    forbidden_hit = replace(
+        search_hit,
+        chunk=replace(search_hit.chunk, classification_level=1),
+    )
+    retrieval.hits = (forbidden_hit,)
+    service = build_query_service(
+        domain=domain_profile,
+        retrieval=retrieval,
+        model=StubModel(),
+        prompts=StubPrompts(),
+    )
+
+    with pytest.raises(PolicyViolationError, match="classification"):
+        service.execute(restricted)
+    assert retrieval.requests[0].allowed_acl_labels == ("public",)
+    assert retrieval.requests[0].max_classification_level == 0
+
+
+def test_query_rejects_foreign_tenant_forbidden_filter_and_diagnostics(
+    domain_profile,
+) -> None:
+    service = build_query_service(
+        domain=domain_profile,
+        retrieval=StubRetrieval(),
+        model=StubModel(),
+        prompts=StubPrompts(),
+    )
+    with pytest.raises(PolicyViolationError, match="tenant"):
+        service.execute(
+            replace(
+                command(),
+                authorization=authorization_context(tenant_id="tenant-b"),
+            )
+        )
+    with pytest.raises(PolicyViolationError, match="filters"):
+        service.execute(replace(command(), filters={"secret": "value"}))
+    with pytest.raises(PolicyViolationError, match="diagnostics"):
+        service.execute(
+            replace(
+                command(),
+                diagnostics_requested=True,
+                authorization=authorization_context(diagnostic_access=False),
+            )
+        )
+
+
+def test_external_model_requires_user_permission(domain_profile) -> None:
+    domain = replace(domain_profile, allow_external_model=True)
+    service = build_query_service(
+        domain=domain,
+        retrieval=StubRetrieval(),
+        model=StubModel(scope="external"),
+        prompts=StubPrompts(),
+    )
+    with pytest.raises(PolicyViolationError, match="authenticated user"):
+        service.execute(command())
+
+    result = service.execute(
+        replace(
+            command(),
+            authorization=authorization_context(allow_external_model=True),
+        )
+    )
+    assert result.answer
+
+
+def test_effective_classification_supports_unbounded_domain_and_user(
+    domain_profile,
+) -> None:
+    retrieval = StubRetrieval()
+    service = build_query_service(
+        domain=replace(domain_profile, max_classification_level=None),
+        retrieval=retrieval,
+        model=StubModel(),
+        prompts=StubPrompts(),
+    )
+    service.execute(command())
+    assert retrieval.requests[-1].max_classification_level == 1
+
+    service.execute(
+        replace(
+            command(),
+            authorization=authorization_context(max_classification_level=None),
+        )
+    )
+    assert retrieval.requests[-1].max_classification_level is None
 
 
 @pytest.mark.parametrize(

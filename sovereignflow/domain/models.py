@@ -20,6 +20,10 @@ def _immutable_mapping(value: Mapping[str, Any] | None) -> Mapping[str, Any]:
     return MappingProxyType(dict(value or {}))
 
 
+def _normalized_values(values: tuple[str, ...], field_name: str) -> tuple[str, ...]:
+    return tuple(sorted({_required(value, f"{field_name}[]") for value in values}))
+
+
 class SearchMode(StrEnum):
     SEMANTIC = "semantic"
     BM25 = "bm25"
@@ -97,6 +101,7 @@ class RetrievalProfile:
     top_k: int
     max_context_characters: int
     filters: Mapping[str, Any] = field(default_factory=dict)
+    allowed_filter_fields: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.top_k < 1:
@@ -106,6 +111,14 @@ class RetrievalProfile:
                 "RetrievalProfile.max_context_characters must be greater than zero"
             )
         object.__setattr__(self, "filters", _immutable_mapping(self.filters))
+        object.__setattr__(
+            self,
+            "allowed_filter_fields",
+            _normalized_values(
+                self.allowed_filter_fields,
+                "RetrievalProfile.allowed_filter_fields",
+            ),
+        )
 
 
 @dataclass(frozen=True)
@@ -149,6 +162,7 @@ class DomainProfile:
     retrieval: RetrievalProfile
     graph: GraphTraversalProfile
     pipeline_name: str = "default"
+    allowed_pipeline_names: tuple[str, ...] = ()
     disclaimer: str = ""
     allowed_acl_labels: tuple[str, ...] = ()
     max_classification_level: int | None = None
@@ -162,6 +176,16 @@ class DomainProfile:
             )
         if self.max_classification_level is not None and self.max_classification_level < 0:
             raise ValidationError("DomainProfile.max_classification_level cannot be negative")
+        allowed_pipeline_names = tuple(
+            sorted(
+                {
+                    _required(name, "DomainProfile.allowed_pipeline_names[]")
+                    for name in self.allowed_pipeline_names
+                }
+                | {self.pipeline_name}
+            )
+        )
+        object.__setattr__(self, "allowed_pipeline_names", allowed_pipeline_names)
         object.__setattr__(
             self,
             "allowed_acl_labels",
@@ -291,12 +315,230 @@ class Citation:
 
 
 @dataclass(frozen=True)
+class AuthorizationContext:
+    subject: str
+    tenant_id: str
+    roles: tuple[str, ...] = ()
+    groups: tuple[str, ...] = ()
+    acl_labels: tuple[str, ...] = ()
+    max_classification_level: int | None = None
+    allow_external_model: bool = False
+    diagnostic_access: bool = False
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "subject", _required(self.subject, "AuthorizationContext.subject"))
+        object.__setattr__(
+            self,
+            "tenant_id",
+            _required(self.tenant_id, "AuthorizationContext.tenant_id"),
+        )
+        if self.max_classification_level is not None and self.max_classification_level < 0:
+            raise ValidationError(
+                "AuthorizationContext.max_classification_level cannot be negative"
+            )
+        for field_name in ("roles", "groups", "acl_labels"):
+            object.__setattr__(
+                self,
+                field_name,
+                _normalized_values(
+                    getattr(self, field_name),
+                    f"AuthorizationContext.{field_name}",
+                ),
+            )
+
+
+@dataclass(frozen=True)
+class CapabilityDescriptor:
+    capability_id: str
+    display_name: str
+    description: str
+    domain: str
+    pipeline_name: str
+    diagnostics_available: bool
+    external_model: bool
+    policy_version: int
+
+    def __post_init__(self) -> None:
+        for field_name in (
+            "capability_id",
+            "display_name",
+            "domain",
+            "pipeline_name",
+        ):
+            object.__setattr__(
+                self,
+                field_name,
+                _required(getattr(self, field_name), f"CapabilityDescriptor.{field_name}"),
+            )
+        if self.policy_version < 1:
+            raise ValidationError("CapabilityDescriptor.policy_version must be positive")
+
+
+@dataclass(frozen=True)
+class ClaimGroupMapping:
+    claim_name: str
+    claim_value: str
+    group_id: str
+
+    def __post_init__(self) -> None:
+        if self.claim_name not in {"groups", "roles"}:
+            raise ValidationError("ClaimGroupMapping.claim_name must be groups or roles")
+        for field_name in ("claim_value", "group_id"):
+            object.__setattr__(
+                self,
+                field_name,
+                _required(getattr(self, field_name), f"ClaimGroupMapping.{field_name}"),
+            )
+
+
+@dataclass(frozen=True)
+class GroupCapabilityGrant:
+    group_id: str
+    capability_id: str
+
+    def __post_init__(self) -> None:
+        for field_name in ("group_id", "capability_id"):
+            object.__setattr__(
+                self,
+                field_name,
+                _required(getattr(self, field_name), f"GroupCapabilityGrant.{field_name}"),
+            )
+
+
+@dataclass(frozen=True)
+class AccessPolicyBundle:
+    tenant_id: str
+    version: int
+    group_ids: tuple[str, ...]
+    claim_mappings: tuple[ClaimGroupMapping, ...]
+    capabilities: tuple[CapabilityDescriptor, ...]
+    grants: tuple[GroupCapabilityGrant, ...]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "tenant_id",
+            _required(self.tenant_id, "AccessPolicyBundle.tenant_id"),
+        )
+        if self.version < 1:
+            raise ValidationError("AccessPolicyBundle.version must be positive")
+        normalized_groups = _normalized_values(
+            self.group_ids,
+            "AccessPolicyBundle.group_ids",
+        )
+        object.__setattr__(self, "group_ids", normalized_groups)
+        group_ids = set(normalized_groups)
+        capability_ids = [item.capability_id for item in self.capabilities]
+        if len(capability_ids) != len(set(capability_ids)):
+            raise ValidationError("AccessPolicyBundle capabilities must be unique")
+        known_capabilities = set(capability_ids)
+        for capability in self.capabilities:
+            if capability.policy_version != self.version:
+                raise ValidationError(
+                    "AccessPolicyBundle capability policy_version must match bundle version"
+                )
+        for mapping in self.claim_mappings:
+            if mapping.group_id not in group_ids:
+                raise ValidationError("Claim mapping references an unknown group")
+        for grant in self.grants:
+            if grant.group_id not in group_ids:
+                raise ValidationError("Capability grant references an unknown group")
+            if grant.capability_id not in known_capabilities:
+                raise ValidationError("Capability grant references an unknown capability")
+        if len(self.claim_mappings) != len(set(self.claim_mappings)):
+            raise ValidationError("AccessPolicyBundle claim mappings must be unique")
+        if len(self.grants) != len(set(self.grants)):
+            raise ValidationError("AccessPolicyBundle grants must be unique")
+
+
+@dataclass(frozen=True)
+class ResolvedAccessPolicy:
+    subject: str
+    tenant_id: str
+    group_ids: tuple[str, ...]
+    capability_ids: tuple[str, ...]
+    pipeline_names: tuple[str, ...]
+    policy_version: int
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "subject", _required(self.subject, "ResolvedAccessPolicy.subject"))
+        object.__setattr__(
+            self,
+            "tenant_id",
+            _required(self.tenant_id, "ResolvedAccessPolicy.tenant_id"),
+        )
+        for field_name in ("group_ids", "capability_ids", "pipeline_names"):
+            object.__setattr__(
+                self,
+                field_name,
+                _normalized_values(
+                    getattr(self, field_name),
+                    f"ResolvedAccessPolicy.{field_name}",
+                ),
+            )
+        if self.policy_version < 1:
+            raise ValidationError("ResolvedAccessPolicy.policy_version must be positive")
+
+
+@dataclass(frozen=True)
+class PipelineAccessDecision:
+    allowed: bool
+    reason_code: str
+    capability: CapabilityDescriptor | None
+    policy: ResolvedAccessPolicy
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "reason_code",
+            _required(self.reason_code, "PipelineAccessDecision.reason_code"),
+        )
+        if self.allowed and self.capability is None:
+            raise ValidationError("Allowed PipelineAccessDecision requires capability")
+
+
+@dataclass(frozen=True)
+class RetrievalDiagnostic:
+    chunk_id: str
+    source_id: str
+    score: float
+    score_type: str
+    rank: int
+    origin: str
+    graph_depth: int | None = None
+    graph_path: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class QueryDiagnostics:
+    contract_version: str
+    subject_hash: str
+    tenant_id: str
+    allowed_acl_labels: tuple[str, ...]
+    max_classification_level: int | None
+    search_mode: SearchMode
+    retrieval: tuple[RetrievalDiagnostic, ...]
+    omitted_chunk_ids: tuple[str, ...]
+    context_chunk_ids: tuple[str, ...]
+    context_characters: int
+    provider: str
+    model: str
+    system_prompt_hash: str
+    prompt_tokens: int
+    completion_tokens: int
+    model_duration_ms: int
+    pipeline_trace: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class QueryCommand:
     request_id: str
     query: str
     domain: str
     session_id: str
+    authorization: AuthorizationContext
     filters: Mapping[str, Any] = field(default_factory=dict)
+    diagnostics_requested: bool = False
 
     def __post_init__(self) -> None:
         for field_name in ("request_id", "query", "domain", "session_id"):
@@ -316,6 +558,7 @@ class QueryResult:
     session_id: str
     citations: tuple[Citation, ...]
     pipeline_trace: tuple[str, ...]
+    diagnostics: QueryDiagnostics | None = None
 
 
 @dataclass(frozen=True)

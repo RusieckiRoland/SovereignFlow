@@ -13,7 +13,7 @@ from dataset_generator.evaluation.contracts import EvaluationError
 
 def test_evaluation_cli_run_and_analyze(monkeypatch, tmp_path: Path, caplog) -> None:
     seen = {}
-    monkeypatch.setenv("DIAGNOSTIC_KEY", "secret")
+    monkeypatch.setenv("ACCESS_TOKEN", "secret")
 
     def fake_execute(config):
         seen["execution"] = config
@@ -37,14 +37,14 @@ def test_evaluation_cli_run_and_analyze(monkeypatch, tmp_path: Path, caplog) -> 
                 str(tmp_path / "results.jsonl"),
                 "--endpoint",
                 "http://localhost/v1/query",
-                "--diagnostic-key-env",
-                "DIAGNOSTIC_KEY",
+                "--access-token-env",
+                "ACCESS_TOKEN",
                 "--overwrite",
             ]
         )
         == 0
     )
-    assert seen["execution"].diagnostic_key == "secret"
+    assert seen["execution"].access_token == "secret"
     assert seen["execution"].overwrite is True
     assert "Executed 3 queries" in caplog.text
 
@@ -74,7 +74,6 @@ def test_evaluation_cli_run_and_analyze(monkeypatch, tmp_path: Path, caplog) -> 
     )
     assert seen["analysis"].recall_at_k == 5
     assert seen["analysis"].write_csv is True
-    assert cli._diagnostic_key(None) is None
 
 
 def test_evaluation_cli_failure_codes(monkeypatch, tmp_path: Path, caplog) -> None:
@@ -115,7 +114,7 @@ def test_evaluation_cli_failure_codes(monkeypatch, tmp_path: Path, caplog) -> No
                 "results.jsonl",
                 "--endpoint",
                 "http://localhost",
-                "--diagnostic-key-env",
+                "--access-token-env",
                 "MISSING_KEY",
             ]
         )

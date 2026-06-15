@@ -1,0 +1,40 @@
+pipeline:
+  name: strict-evidence-rag
+  entry_step: normalize_query
+  behavior_version: "1.0"
+  max_steps: 7
+  steps:
+    - id: normalize_query
+      action: normalize_query
+      action_version: "1.0"
+      next: retrieve
+
+    - id: retrieve
+      action: retrieve
+      action_version: "1.0"
+      next: expand_graph
+
+    - id: expand_graph
+      action: expand_graph
+      action_version: "1.0"
+      next: build_context
+
+    - id: build_context
+      action: build_context
+      action_version: "1.0"
+      next: require_evidence
+
+    - id: require_evidence
+      action: require_evidence
+      action_version: "1.0"
+      next: call_model
+
+    - id: call_model
+      action: call_model
+      action_version: "1.0"
+      next: finalize
+
+    - id: finalize
+      action: finalize
+      action_version: "1.0"
+      end: true

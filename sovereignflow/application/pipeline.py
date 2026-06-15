@@ -4,6 +4,7 @@ import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
+from hashlib import sha256
 from typing import Protocol
 
 from sovereignflow.domain import (
@@ -17,7 +18,9 @@ from sovereignflow.domain import (
     PipelineStepAudit,
     PolicyViolationError,
     QueryCommand,
+    QueryDiagnostics,
     QueryResult,
+    RetrievalDiagnostic,
     SearchHit,
     SearchRequest,
     SovereignFlowError,
@@ -42,12 +45,18 @@ class PipelineContext:
     prompts: PromptRepositoryPort
     normalized_query: str = ""
     hits: tuple[SearchHit, ...] = ()
+    seed_hits: tuple[SearchHit, ...] = ()
+    graph_hits: tuple[SearchHit, ...] = ()
+    omitted_chunk_ids: tuple[str, ...] = ()
+    context_chunk_ids: tuple[str, ...] = ()
     evidence: str = ""
     citations: tuple[Citation, ...] = ()
     answer: str = ""
     prompt_tokens: int = 0
     completion_tokens: int = 0
     estimated_cost: float = 0.0
+    model_duration_ms: int = 0
+    system_prompt_hash: str = ""
     trace: list[str] = field(default_factory=list)
 
 
@@ -79,22 +88,24 @@ class RetrieveAction:
 
     def execute(self, context: PipelineContext) -> str | None:
         domain = context.domain
+        authorization = context.command.authorization
         filters = {**context.command.filters, **domain.retrieval.filters}
-        context.hits = tuple(
+        context.seed_hits = tuple(
             context.retrieval.search(
                 SearchRequest(
                     query=context.normalized_query,
                     domain=domain.name,
-                    tenant_id=domain.tenant_id,
+                    tenant_id=authorization.tenant_id,
                     top_k=domain.retrieval.top_k,
                     mode=domain.retrieval.mode,
                     filters=filters,
-                    allowed_acl_labels=domain.allowed_acl_labels,
-                    max_classification_level=domain.max_classification_level,
+                    allowed_acl_labels=authorization.acl_labels,
+                    max_classification_level=authorization.max_classification_level,
                 )
             )
         )
-        _verify_retrieval_boundary(domain, context.hits)
+        _verify_retrieval_boundary(domain, authorization, context.seed_hits)
+        context.hits = context.seed_hits
         return None
 
 
@@ -108,23 +119,28 @@ class ExpandGraphAction:
         profile = context.domain.graph
         if not profile.enabled or not context.hits:
             return None
+        authorization = context.command.authorization
         expanded = tuple(
             context.graph.expand(
                 GraphTraversalRequest(
                     seeds=context.hits,
                     domain=context.domain.name,
-                    tenant_id=context.domain.tenant_id,
+                    tenant_id=authorization.tenant_id,
                     max_depth=profile.max_depth,
                     max_nodes=profile.max_nodes,
                     direction=profile.direction,
                     relationship_types=profile.relationship_types,
-                    allowed_acl_labels=context.domain.allowed_acl_labels,
-                    max_classification_level=context.domain.max_classification_level,
+                    allowed_acl_labels=authorization.acl_labels,
+                    max_classification_level=authorization.max_classification_level,
                 )
             )
         )
-        _verify_retrieval_boundary(context.domain, expanded)
-        context.hits = (*context.hits, *expanded)
+        _verify_retrieval_boundary(context.domain, authorization, expanded)
+        context.graph_hits = expanded
+        unique = {hit.chunk.chunk_id: hit for hit in context.seed_hits}
+        for hit in expanded:
+            unique.setdefault(hit.chunk.chunk_id, hit)
+        context.hits = tuple(unique.values())
         return None
 
 
@@ -135,10 +151,24 @@ class BuildContextAction:
     provides = frozenset({"evidence", "citations"})
 
     def execute(self, context: PipelineContext) -> str | None:
-        context.evidence, context.citations = _build_context(
-            context.hits,
-            context.domain.retrieval.max_context_characters,
-        )
+        (
+            context.evidence,
+            context.citations,
+            context.context_chunk_ids,
+            context.omitted_chunk_ids,
+        ) = _build_context(context.hits, context.domain.retrieval.max_context_characters)
+        return None
+
+
+class RequireEvidenceAction:
+    action_id = "require_evidence"
+    behavior_version = "1.0"
+    requires = frozenset({"evidence", "citations"})
+    provides = frozenset()
+
+    def execute(self, context: PipelineContext) -> str | None:
+        if not context.evidence or not context.citations:
+            raise PipelineExecutionError("The pipeline requires retrieved evidence")
         return None
 
 
@@ -149,14 +179,18 @@ class CallModelAction:
     provides = frozenset({"answer"})
 
     def execute(self, context: PipelineContext) -> str | None:
+        system_prompt = context.prompts.load(context.domain.prompt_name)
+        context.system_prompt_hash = sha256(system_prompt.encode("utf-8")).hexdigest()
+        started = time.monotonic()
         generation = context.model.generate(
-            system_prompt=context.prompts.load(context.domain.prompt_name),
+            system_prompt=system_prompt,
             user_prompt=(
                 f"USER QUESTION\n{context.normalized_query}\n\n"
                 f"EVIDENCE\n{context.evidence}\n\n"
                 "Answer from the evidence and state uncertainty explicitly."
             ),
         )
+        context.model_duration_ms = max(0, round((time.monotonic() - started) * 1000))
         context.answer = generation.text
         context.prompt_tokens = generation.prompt_tokens
         context.completion_tokens = generation.completion_tokens
@@ -201,6 +235,7 @@ def default_action_registry() -> ActionRegistry:
             RetrieveAction(),
             ExpandGraphAction(),
             BuildContextAction(),
+            RequireEvidenceAction(),
             CallModelAction(),
             FinalizeAction(),
         )
@@ -298,7 +333,7 @@ class PipelineEngine:
                 request_id=context.command.request_id,
                 session_id=context.command.session_id,
                 domain=context.domain.name,
-                tenant_id=context.domain.tenant_id,
+                tenant_id=context.command.authorization.tenant_id,
                 pipeline_name=pipeline.name,
                 pipeline_version=pipeline.behavior_version,
                 pipeline_checksum=pipeline.checksum,
@@ -338,6 +373,7 @@ class PipelineEngine:
                 session_id=context.command.session_id,
                 citations=context.citations,
                 pipeline_trace=tuple(context.trace),
+                diagnostics=_diagnostics(context),
             )
             self._audit.succeed(
                 run_id,
@@ -380,16 +416,17 @@ class PipelineEngine:
 
 def _verify_retrieval_boundary(
     domain: DomainProfile,
+    authorization,
     hits: Sequence[SearchHit],
 ) -> None:
-    allowed_labels = set(domain.allowed_acl_labels)
+    allowed_labels = set(authorization.acl_labels)
     for hit in hits:
         chunk = hit.chunk
-        if chunk.domain != domain.name or chunk.tenant_id != domain.tenant_id:
+        if chunk.domain != domain.name or chunk.tenant_id != authorization.tenant_id:
             raise PolicyViolationError("Retrieval provider crossed a domain or tenant boundary")
-        if chunk.acl_labels and not set(chunk.acl_labels).issubset(allowed_labels):
+        if chunk.acl_labels and not set(chunk.acl_labels).intersection(allowed_labels):
             raise PolicyViolationError("Retrieval provider returned a forbidden ACL label")
-        maximum = domain.max_classification_level
+        maximum = authorization.max_classification_level
         if maximum is not None and chunk.classification_level > maximum:
             raise PolicyViolationError(
                 "Retrieval provider returned a forbidden classification level"
@@ -399,16 +436,19 @@ def _verify_retrieval_boundary(
 def _build_context(
     hits: Sequence[SearchHit],
     maximum: int,
-) -> tuple[str, tuple[Citation, ...]]:
+) -> tuple[str, tuple[Citation, ...], tuple[str, ...], tuple[str, ...]]:
     used = 0
     blocks: list[str] = []
     citations: list[Citation] = []
-    for hit in hits:
+    chunk_ids: list[str] = []
+    omitted: list[str] = []
+    for index, hit in enumerate(hits):
         block = (
             f"[source_id={hit.chunk.source_id}; chunk_id={hit.chunk.chunk_id}; "
             f"{hit.score_type}={hit.score:.6f}]\n{hit.chunk.text}"
         )
-        selected = block[: maximum - used]
+        remaining = maximum - used
+        selected = block[:remaining]
         blocks.append(selected)
         used += len(selected)
         citations.append(
@@ -421,7 +461,56 @@ def _build_context(
                 metadata=hit.chunk.metadata,
             )
         )
+        chunk_ids.append(hit.chunk.chunk_id)
         if len(selected) < len(block):
+            omitted.extend(item.chunk.chunk_id for item in hits[index + 1 :])
             break
     evidence = "\n\n---\n\n".join(blocks) or "No relevant evidence was retrieved."
-    return evidence, tuple(citations)
+    return evidence, tuple(citations), tuple(chunk_ids), tuple(omitted)
+
+
+def _diagnostics(context: PipelineContext) -> QueryDiagnostics:
+    origins = {hit.chunk.chunk_id: "seed" for hit in context.seed_hits}
+    origins.update(
+        {
+            hit.chunk.chunk_id: "graph"
+            for hit in context.graph_hits
+            if hit.chunk.chunk_id not in origins
+        }
+    )
+    authorization = context.command.authorization
+    return QueryDiagnostics(
+        contract_version="1.0",
+        subject_hash=sha256(authorization.subject.encode("utf-8")).hexdigest(),
+        tenant_id=authorization.tenant_id,
+        allowed_acl_labels=authorization.acl_labels,
+        max_classification_level=authorization.max_classification_level,
+        search_mode=context.domain.retrieval.mode,
+        retrieval=tuple(
+            RetrievalDiagnostic(
+                chunk_id=hit.chunk.chunk_id,
+                source_id=hit.chunk.source_id,
+                score=hit.score,
+                score_type=hit.score_type,
+                rank=index,
+                origin=origins.get(hit.chunk.chunk_id, "seed"),
+                graph_depth=(
+                    int(hit.chunk.metadata["graph_depth"])
+                    if "graph_depth" in hit.chunk.metadata
+                    else None
+                ),
+                graph_path=tuple(hit.chunk.metadata.get("graph_path", ())),
+            )
+            for index, hit in enumerate(context.hits, start=1)
+        ),
+        omitted_chunk_ids=context.omitted_chunk_ids,
+        context_chunk_ids=context.context_chunk_ids,
+        context_characters=len(context.evidence),
+        provider=context.model.name,
+        model=context.model.model_id,
+        system_prompt_hash=context.system_prompt_hash,
+        prompt_tokens=context.prompt_tokens,
+        completion_tokens=context.completion_tokens,
+        model_duration_ms=context.model_duration_ms,
+        pipeline_trace=tuple(context.trace),
+    )

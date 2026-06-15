@@ -66,6 +66,31 @@ class AdminSettings:
 
 
 @dataclass(frozen=True)
+class IdentityProviderSettings:
+    issuer: str
+    audience: str
+    jwks_url: str
+    algorithms: tuple[str, ...]
+    timeout_seconds: float
+    cache_ttl_seconds: int
+    tenant_claim: str
+    roles_claim: str
+    groups_claim: str
+    acl_claim: str
+    classification_claim: str
+    external_model_claim: str
+    diagnostic_claim: str
+
+
+@dataclass(frozen=True)
+class WebClientSettings:
+    client_id: str
+    authorization_url: str
+    token_url: str
+    logout_url: str
+
+
+@dataclass(frozen=True)
 class SovereignFlowSettings:
     config_path: Path
     server: ServerSettings
@@ -74,9 +99,11 @@ class SovereignFlowSettings:
     embeddings: EmbeddingSettings
     selected_model: ModelSettings
     admin: AdminSettings
+    identity_provider: IdentityProviderSettings
     prompts_root: Path
     pipelines_root: Path
     domains: tuple[DomainProfile, ...]
+    web_client: WebClientSettings | None = None
 
 
 def load_settings(path: str | Path) -> SovereignFlowSettings:
@@ -87,6 +114,10 @@ def load_settings(path: str | Path) -> SovereignFlowSettings:
     weaviate = _mapping(raw, "weaviate")
     embeddings = _mapping(raw, "embeddings")
     admin = _mapping(raw, "admin")
+    identity_provider = _mapping(raw, "identity_provider")
+    web_client = raw.get("web_client")
+    if web_client is not None and not isinstance(web_client, dict):
+        raise ConfigurationError("web_client must be a mapping")
 
     models_raw = raw.get("models")
     if not isinstance(models_raw, list) or not models_raw:
@@ -168,6 +199,8 @@ def load_settings(path: str | Path) -> SovereignFlowSettings:
         ),
         selected_model=selected,
         admin=AdminSettings(api_key=_secret(admin.get("api_key_env"))),
+        identity_provider=_identity_provider_settings(identity_provider),
+        web_client=(_web_client_settings(web_client) if isinstance(web_client, dict) else None),
         prompts_root=prompt_root,
         pipelines_root=pipelines_root,
         domains=domains,
@@ -201,6 +234,59 @@ def _model_settings(raw: Any) -> ModelSettings:
     )
 
 
+def _identity_provider_settings(raw: dict[str, Any]) -> IdentityProviderSettings:
+    algorithms = raw.get("algorithms")
+    if not isinstance(algorithms, list) or not algorithms:
+        raise ConfigurationError("identity_provider.algorithms must be a non-empty list")
+    return IdentityProviderSettings(
+        issuer=_required(raw.get("issuer"), "identity_provider.issuer"),
+        audience=_required(raw.get("audience"), "identity_provider.audience"),
+        jwks_url=_required(raw.get("jwks_url"), "identity_provider.jwks_url"),
+        algorithms=tuple(
+            _required(value, "identity_provider.algorithms[]") for value in algorithms
+        ),
+        timeout_seconds=_positive_float(
+            raw.get("timeout_seconds"),
+            "identity_provider.timeout_seconds",
+        ),
+        cache_ttl_seconds=_positive_int(
+            raw.get("cache_ttl_seconds"),
+            "identity_provider.cache_ttl_seconds",
+        ),
+        tenant_claim=_required(
+            raw.get("tenant_claim"),
+            "identity_provider.tenant_claim",
+        ),
+        roles_claim=_required(raw.get("roles_claim"), "identity_provider.roles_claim"),
+        groups_claim=_required(raw.get("groups_claim"), "identity_provider.groups_claim"),
+        acl_claim=_required(raw.get("acl_claim"), "identity_provider.acl_claim"),
+        classification_claim=_required(
+            raw.get("classification_claim"),
+            "identity_provider.classification_claim",
+        ),
+        external_model_claim=_required(
+            raw.get("external_model_claim"),
+            "identity_provider.external_model_claim",
+        ),
+        diagnostic_claim=_required(
+            raw.get("diagnostic_claim"),
+            "identity_provider.diagnostic_claim",
+        ),
+    )
+
+
+def _web_client_settings(raw: dict[str, Any]) -> WebClientSettings:
+    return WebClientSettings(
+        client_id=_required(raw.get("client_id"), "web_client.client_id"),
+        authorization_url=_absolute_http_url(
+            raw.get("authorization_url"),
+            "web_client.authorization_url",
+        ),
+        token_url=_absolute_http_url(raw.get("token_url"), "web_client.token_url"),
+        logout_url=_absolute_http_url(raw.get("logout_url"), "web_client.logout_url"),
+    )
+
+
 def _load_domain(path: Path) -> DomainProfile:
     raw = _read_yaml(path)
     retrieval = _mapping(raw, "retrieval")
@@ -212,10 +298,16 @@ def _load_domain(path: Path) -> DomainProfile:
     filters = retrieval.get("filters")
     if not isinstance(filters, dict):
         raise ConfigurationError("retrieval.filters must be a mapping")
+    allowed_filter_fields = retrieval.get("allowed_filter_fields")
+    if not isinstance(allowed_filter_fields, list):
+        raise ConfigurationError("retrieval.allowed_filter_fields must be a list")
     labels = raw.get("allowed_acl_labels")
     if not isinstance(labels, list):
         raise ConfigurationError("allowed_acl_labels must be a list")
     maximum = raw.get("max_classification_level")
+    allowed_pipeline_names = raw.get("allowed_pipeline_names", [])
+    if not isinstance(allowed_pipeline_names, list):
+        raise ConfigurationError("allowed_pipeline_names must be a list")
     relationship_types = graph.get("relationship_types")
     if not isinstance(relationship_types, list):
         raise ConfigurationError("graph.relationship_types must be a list")
@@ -232,6 +324,7 @@ def _load_domain(path: Path) -> DomainProfile:
         tenant_id=_required(raw.get("tenant_id"), "tenant_id"),
         prompt_name=_required(raw.get("prompt_name"), "prompt_name"),
         pipeline_name=_required(raw.get("pipeline_name"), "pipeline_name"),
+        allowed_pipeline_names=tuple(str(name) for name in allowed_pipeline_names),
         allow_external_model=_required_bool(
             raw.get("allow_external_model"),
             "allow_external_model",
@@ -247,6 +340,7 @@ def _load_domain(path: Path) -> DomainProfile:
                 "retrieval.max_context_characters",
             ),
             filters=filters,
+            allowed_filter_fields=tuple(str(item) for item in allowed_filter_fields),
         ),
         graph=GraphTraversalProfile(
             enabled=_required_bool(graph.get("enabled"), "graph.enabled"),
@@ -281,6 +375,16 @@ def _required(value: Any, field_name: str) -> str:
     normalized = str(value or "").strip()
     if not normalized:
         raise ConfigurationError(f"{field_name} is required")
+    return normalized
+
+
+def _absolute_http_url(value: Any, field_name: str) -> str:
+    normalized = _required(value, field_name)
+    from urllib.parse import urlsplit
+
+    parsed = urlsplit(normalized)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ConfigurationError(f"{field_name} must be an absolute HTTP URL")
     return normalized
 
 

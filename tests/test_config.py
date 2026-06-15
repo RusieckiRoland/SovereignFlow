@@ -25,6 +25,7 @@ def valid_files(tmp_path: Path) -> tuple[Path, dict]:
                 "tenant_id": "tenant-a",
                 "prompt_name": "answer",
                 "pipeline_name": "default",
+                "allowed_pipeline_names": ["direct", "graph", "strict"],
                 "allow_external_model": False,
                 "disclaimer": "Verify.",
                 "allowed_acl_labels": ["public"],
@@ -34,6 +35,7 @@ def valid_files(tmp_path: Path) -> tuple[Path, dict]:
                     "top_k": 3,
                     "max_context_characters": 1000,
                     "filters": {"status": "active"},
+                    "allowed_filter_fields": ["country", "status"],
                 },
                 "graph": {
                     "enabled": True,
@@ -65,6 +67,21 @@ def valid_files(tmp_path: Path) -> tuple[Path, dict]:
             }
         ],
         "admin": {"api_key_env": "TEST_ADMIN_KEY"},
+        "identity_provider": {
+            "issuer": "https://identity.test",
+            "audience": "sovereignflow",
+            "jwks_url": "https://identity.test/jwks",
+            "algorithms": ["RS256"],
+            "timeout_seconds": 5,
+            "cache_ttl_seconds": 300,
+            "tenant_claim": "tenant_id",
+            "roles_claim": "roles",
+            "groups_claim": "groups",
+            "acl_claim": "acl_labels",
+            "classification_claim": "max_classification_level",
+            "external_model_claim": "allow_external_model",
+            "diagnostic_claim": "sovereignflow_diagnostics",
+        },
         "embeddings": {
             "name": "embed",
             "base_url": "http://localhost:8082/v1",
@@ -104,6 +121,12 @@ def test_load_settings_resolves_complete_configuration(tmp_path: Path) -> None:
     path, raw = valid_files(tmp_path)
     raw["models"][0]["api_key_env"] = "TEST_MODEL_KEY"
     raw["embeddings"]["api_key_env"] = "TEST_EMBED_KEY"
+    raw["web_client"] = {
+        "client_id": "web-client",
+        "authorization_url": "https://identity.test/authorize",
+        "token_url": "https://identity.test/token",
+        "logout_url": "https://identity.test/logout",
+    }
     write(path, raw)
 
     settings = load_settings(path)
@@ -114,22 +137,85 @@ def test_load_settings_resolves_complete_configuration(tmp_path: Path) -> None:
     assert settings.selected_model.api_key == "model-secret"
     assert settings.embeddings.api_key == "embed-secret"
     assert settings.admin.api_key == "admin-secret"
+    assert settings.identity_provider.audience == "sovereignflow"
+    assert settings.web_client is not None
+    assert settings.web_client.client_id == "web-client"
     assert settings.selected_model.input_cost_per_million == 1.5
     assert settings.domains[0].retrieval.mode == SearchMode.HYBRID
     assert settings.domains[0].graph.max_depth == 2
+    assert settings.domains[0].allowed_pipeline_names == (
+        "default",
+        "direct",
+        "graph",
+        "strict",
+    )
     assert settings.prompts_root == tmp_path / "prompts"
 
 
 @pytest.mark.parametrize(
     "key",
-    ["server", "postgresql", "weaviate", "embeddings", "admin"],
+    ["server", "postgresql", "weaviate", "embeddings", "admin", "identity_provider"],
 )
 def test_load_settings_requires_mapping_sections(tmp_path: Path, key: str) -> None:
-    path, raw = valid_files(tmp_path)
+    invalid_pipeline_root = tmp_path / "invalid-pipeline"
+    invalid_pipeline_root.mkdir()
+    path, raw = valid_files(invalid_pipeline_root)
     raw[key] = None
     write(path, raw)
 
     with pytest.raises(ConfigurationError, match=key):
+        load_settings(path)
+
+
+def test_identity_provider_and_allowed_filter_configuration_are_strict(
+    tmp_path: Path,
+) -> None:
+    path, raw = valid_files(tmp_path)
+    raw["identity_provider"]["algorithms"] = []
+    write(path, raw)
+    with pytest.raises(ConfigurationError, match="algorithms"):
+        load_settings(path)
+
+    invalid_pipeline_root = tmp_path / "invalid-pipeline"
+    invalid_pipeline_root.mkdir()
+    path, raw = valid_files(invalid_pipeline_root)
+    raw["domains"] = ["domain.yaml"]
+    domain_path = invalid_pipeline_root / "domain.yaml"
+    domain = yaml.safe_load(domain_path.read_text(encoding="utf-8"))
+    domain["allowed_pipeline_names"] = "direct"
+    write(domain_path, domain)
+    with pytest.raises(ConfigurationError, match="allowed_pipeline_names"):
+        load_settings(path)
+
+
+def test_web_client_configuration_is_optional_and_strict(tmp_path: Path) -> None:
+    path, raw = valid_files(tmp_path)
+
+    assert load_settings(path).web_client is None
+
+    raw["web_client"] = "invalid"
+    write(path, raw)
+    with pytest.raises(ConfigurationError, match="web_client must be a mapping"):
+        load_settings(path)
+
+    raw["web_client"] = {
+        "client_id": "web-client",
+        "authorization_url": "not-a-url",
+        "token_url": "https://identity.test/token",
+        "logout_url": "https://identity.test/logout",
+    }
+    write(path, raw)
+    with pytest.raises(ConfigurationError, match="absolute HTTP URL"):
+        load_settings(path)
+
+    second = tmp_path / "second"
+    second.mkdir()
+    path, raw = valid_files(second)
+    domain_path = second / "domain.yaml"
+    domain = yaml.safe_load(domain_path.read_text(encoding="utf-8"))
+    domain["retrieval"]["allowed_filter_fields"] = "country"
+    write(domain_path, domain)
+    with pytest.raises(ConfigurationError, match="allowed_filter_fields"):
         load_settings(path)
 
 

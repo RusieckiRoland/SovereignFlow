@@ -35,6 +35,26 @@ services:
     volumes:
       - sovereignflow_weaviate:/var/lib/weaviate
 
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.1
+    profiles: ["identity"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-change-me}
+      KC_DB: dev-file
+      KC_HTTP_ENABLED: "true"
+      KC_HEALTH_ENABLED: "true"
+      KC_METRICS_ENABLED: "true"
+    command:
+      - start-dev
+      - --import-realm
+      - --http-port=8080
+      - --hostname-strict=false
+    ports:
+      - "127.0.0.1:${SOVEREIGNFLOW_KEYCLOAK_PORT:-28090}:8080"
+    volumes:
+      - ./infra/keycloak/sovereignflow-realm.json:/opt/keycloak/data/import/sovereignflow-realm.json:ro
+
 volumes:
   sovereignflow_postgres:
   sovereignflow_weaviate:

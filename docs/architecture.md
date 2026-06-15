@@ -16,8 +16,11 @@ SovereignFlow owns reusable RAG mechanics:
 - durable execution history and step audit,
 - versioned, idempotent document ingestion,
 - bounded traversal of neutral document relationships.
+- OIDC/OAuth 2.0 access-token validation through cached and rotated JWKS;
+- authorization derived exclusively from signed identity claims;
 - authenticated, tenant-scoped operational administration;
 - durable quality, latency, token-usage, and cost metrics.
+- fail-closed authorization from versioned internal groups to capabilities and exact pipelines.
 
 Domain projects own source semantics and business rules.
 
@@ -122,7 +125,7 @@ The graph adapter does not load the entire tenant graph into memory. It performs
 - maximum depth;
 - maximum number of expanded nodes;
 - current source versions;
-- ACL subset policy;
+- public-or-matching-label ACL policy;
 - classification ceiling.
 
 The pipeline performs vector or keyword retrieval first. Retrieved chunks become graph seeds, and the explicit `expand_graph` action appends permitted related chunks before context construction. Graph evidence retains depth and relationship-path metadata.
@@ -131,7 +134,29 @@ The pipeline performs vector or keyword retrieval first. Retrieved chunks become
 
 External transmission is denied by configuration, not by convention. Configuration selects exactly one model endpoint before startup. If that endpoint fails, the request fails; SovereignFlow does not try another provider.
 
-Weaviate anonymous access is disabled. Tenant, ACL, and classification boundaries are applied in retrieval and verified again before evidence is sent to the model.
+Query authentication uses a provider-neutral OIDC adapter. Signed JWT access tokens are validated for signature, issuer, audience, expiry, subject, and configured authorization claims. Signing keys come from JWKS with a bounded cache and explicit refresh on key rotation.
+
+The repository includes an optional Keycloak development realm to verify this
+standard contract against a real Identity Provider. Keycloak is connected only
+through issuer, audience, token, and JWKS endpoints; no Keycloak-specific type
+crosses the infrastructure boundary.
+
+The application derives tenant, roles, groups, ACL labels, classification ceiling, external-model permission, and diagnostic permission from the validated token. Query JSON cannot supply or override these values.
+
+Identity Provider group and role names are not permissions. PostgreSQL stores
+explicit claim-value mappings to internal SovereignFlow groups. Group grants are
+resolved as a deterministic union within the token tenant. A public request sends
+only a stable `capability_id`; the backend maps it to one configured domain and
+pipeline and reauthorizes it before every execution.
+
+Policy publication replaces mappings, groups, capabilities, and grants in one
+transaction guarded by an optional expected version. A missing policy or mapping
+means `deny all`. Security decisions store a hash of the subject rather than the
+token or raw claims.
+
+Weaviate anonymous access is disabled. Tenant, public-or-matching-label ACL, and classification boundaries are applied in retrieval and verified again before evidence is sent to the model. PostgreSQL graph traversal applies the same authorization context and current-source-version boundary.
+
+Diagnostic query output requires the dedicated token claim configured by `identity_provider.diagnostic_claim`. It exposes identifiers, scores, graph metadata, context size, model identity, token usage, prompt hash, and pipeline steps without returning hidden document text or the complete prompt.
 
 Execution-history, metrics, ingestion-job inspection, and ingestion retry are exposed only through the administrative API. Every administrative request requires:
 

@@ -4,6 +4,9 @@ from collections.abc import Iterable, Sequence
 from typing import Protocol
 
 from sovereignflow.domain import (
+    AccessPolicyBundle,
+    AuthorizationContext,
+    CapabilityDescriptor,
     DatasetImportRequest,
     DatasetImportRun,
     DatasetImportStatus,
@@ -13,9 +16,52 @@ from sovereignflow.domain import (
     ModelGeneration,
     PipelineRun,
     PipelineStepAudit,
+    ResolvedAccessPolicy,
     SearchHit,
     SearchRequest,
 )
+
+
+class AuthenticationPort(Protocol):
+    def authenticate(self, access_token: str) -> AuthorizationContext: ...
+
+
+class AccessPolicyRepositoryPort(Protocol):
+    def resolve(self, authorization: AuthorizationContext) -> ResolvedAccessPolicy: ...
+
+    def capabilities(
+        self,
+        policy: ResolvedAccessPolicy,
+    ) -> Sequence[CapabilityDescriptor]: ...
+
+    def capability(
+        self,
+        capability_id: str,
+        *,
+        policy: ResolvedAccessPolicy,
+    ) -> CapabilityDescriptor | None: ...
+
+    def publish(
+        self,
+        bundle: AccessPolicyBundle,
+        *,
+        expected_version: int | None,
+    ) -> None: ...
+
+
+class SecurityDecisionAuditPort(Protocol):
+    def record(
+        self,
+        *,
+        request_id: str,
+        subject: str,
+        tenant_id: str,
+        capability_id: str,
+        pipeline_name: str | None,
+        allowed: bool,
+        reason_code: str,
+        policy_version: int,
+    ) -> None: ...
 
 
 class RetrievalPort(Protocol):
@@ -39,6 +85,12 @@ class EmbeddingGatewayPort(Protocol):
 
 
 class ModelGatewayPort(Protocol):
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def model_id(self) -> str: ...
+
     @property
     def scope(self) -> str: ...
 

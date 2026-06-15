@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SovereignFlow Test Console</title>
+    <link rel="stylesheet" href="/app/assets/app.css">
+    <script type="module" src="/app/assets/app.js"></script>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Neutral RAG verification</p>
+          <h1>SovereignFlow Test Console</h1>
+          <p class="subtitle">
+            Sign in through the configured identity provider, run a query, and inspect
+            the evidence and execution trace returned by SovereignFlow.
+          </p>
+        </div>
+        <div class="session">
+          <span id="session-status" class="status">Loading configuration…</span>
+          <button id="sign-in" type="button" class="primary" hidden>Sign in</button>
+          <button id="sign-out" type="button" class="secondary" hidden>Sign out</button>
+        </div>
+      </header>
+
+      <section id="identity-card" class="card identity-card" hidden>
+        <div>
+          <span class="label">Signed in as</span>
+          <strong id="user-name"></strong>
+        </div>
+        <div>
+          <span class="label">Tenant</span>
+          <strong id="tenant-id"></strong>
+        </div>
+        <div>
+          <span class="label">ACL labels</span>
+          <strong id="acl-labels"></strong>
+        </div>
+        <div>
+          <span class="label">Classification ceiling</span>
+          <strong id="classification-level"></strong>
+        </div>
+      </section>
+
+      <section class="workspace">
+        <form id="query-form" class="card query-card">
+          <h2>Run a RAG query</h2>
+          <label>
+            Available pipeline
+            <select id="domain" name="domain" required disabled></select>
+          </label>
+          <label>
+            Question
+            <textarea
+              id="query"
+              name="query"
+              rows="5"
+              required
+              disabled
+            >How are Orders_000001 records stored?</textarea>
+          </label>
+          <label class="checkbox">
+            <input id="diagnostics" type="checkbox" checked disabled>
+            Include diagnostic retrieval trace
+          </label>
+          <button id="submit-query" type="submit" class="primary" disabled>
+            Run query
+          </button>
+          <p id="request-status" class="request-status" aria-live="polite"></p>
+        </form>
+
+        <section class="card results-card">
+          <div class="results-heading">
+            <h2>Result</h2>
+            <span id="request-id" class="request-id"></span>
+          </div>
+          <div id="empty-result" class="empty-result">
+            Sign in and run a query to inspect the response.
+          </div>
+          <div id="result" hidden>
+            <h3>Answer</h3>
+            <div id="answer" class="answer"></div>
+
+            <h3>Citations</h3>
+            <div id="citations" class="citations"></div>
+
+            <details>
+              <summary>Pipeline trace</summary>
+              <pre id="pipeline-trace"></pre>
+            </details>
+            <details>
+              <summary>Diagnostics</summary>
+              <pre id="diagnostics-output"></pre>
+            </details>
+            <details>
+              <summary>Raw response</summary>
+              <pre id="raw-response"></pre>
+            </details>
+          </div>
+        </section>
+      </section>
+    </main>
+  </body>
+</html>

@@ -1,3 +1,4 @@
+from .authorization import PipelineAuthorizationService
 from .dataset_import import DatasetImportService
 from .ingestion import DocumentIngestionService
 from .operations import OperationsService
@@ -8,7 +9,9 @@ from .pipeline import (
     PipelineValidator,
     default_action_registry,
 )
+from .policy_administration import PolicyAdministrationService
 from .ports import (
+    AuthenticationPort,
     EmbeddingGatewayPort,
     ExecutionAuditPort,
     GraphTraversalPort,
@@ -23,6 +26,7 @@ from .query_service import RagQueryService
 
 __all__ = [
     "ActionRegistry",
+    "AuthenticationPort",
     "DatasetImportService",
     "DocumentIngestionService",
     "EmbeddingGatewayPort",
@@ -34,6 +38,8 @@ __all__ = [
     "OperationsService",
     "PipelineContext",
     "PipelineEngine",
+    "PipelineAuthorizationService",
+    "PolicyAdministrationService",
     "PipelineValidator",
     "PromptRepositoryPort",
     "RagQueryService",

@@ -4,6 +4,11 @@ collection: SovereignFlowGeneral
 tenant_id: default
 prompt_name: answer
 pipeline_name: default
+allowed_pipeline_names:
+  - default
+  - direct
+  - graph
+  - strict
 allow_external_model: false
 disclaimer: |
   This response is generated from retrieved source material and should be verified by the user.
@@ -14,6 +19,7 @@ retrieval:
   top_k: 8
   max_context_characters: 24000
   filters: {}
+  allowed_filter_fields: []
 graph:
   enabled: true
   max_depth: 2

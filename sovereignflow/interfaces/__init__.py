@@ -1,3 +1,3 @@
-from .http_api import QueryDispatcher, create_app
+from .http_api import QueryDispatcher, WebClientConfiguration, create_app
 
-__all__ = ["QueryDispatcher", "create_app"]
+__all__ = ["QueryDispatcher", "WebClientConfiguration", "create_app"]

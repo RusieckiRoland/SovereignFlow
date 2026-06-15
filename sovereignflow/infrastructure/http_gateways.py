@@ -120,6 +120,14 @@ class OpenAIModelGateway:
         self._http = http_client or _JsonHttpClient()
 
     @property
+    def name(self) -> str:
+        return self._endpoint.name
+
+    @property
+    def model_id(self) -> str:
+        return self._endpoint.model
+
+    @property
     def scope(self) -> str:
         return self._endpoint.scope
 

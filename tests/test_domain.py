@@ -5,6 +5,7 @@ from types import MappingProxyType
 import pytest
 
 from sovereignflow.domain import (
+    AuthorizationContext,
     Citation,
     DatasetConsistencyReport,
     DatasetImportRequest,
@@ -47,6 +48,7 @@ def test_domain_models_normalize_and_freeze_values() -> None:
         query=" query ",
         domain=" domain ",
         session_id=" session ",
+        authorization=AuthorizationContext("subject", "tenant"),
         filters={"key": "value"},
     )
 
@@ -58,6 +60,9 @@ def test_domain_models_normalize_and_freeze_values() -> None:
     generation = ModelGeneration(" answer ", 10, 5, 0.25)
     assert generation.text == "answer"
     assert generation.total_tokens == 15
+
+    with pytest.raises(ValidationError, match="cannot be negative"):
+        AuthorizationContext("subject", "tenant", max_classification_level=-1)
 
 
 def test_graph_models_normalize_and_freeze_values(search_hit) -> None:
@@ -318,7 +323,7 @@ def test_graph_models_reject_invalid_values(factory, message: str) -> None:
             "Citation.source_id",
         ),
         (
-            lambda: QueryCommand("", "q", "d", "s"),
+            lambda: QueryCommand("", "q", "d", "s", AuthorizationContext("u", "t")),
             "QueryCommand.request_id",
         ),
     ],

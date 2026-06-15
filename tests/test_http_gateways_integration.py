@@ -57,6 +57,8 @@ def test_gateways_use_real_openai_compatible_http_protocol(http_server) -> None:
     )
 
     assert model.scope == "local"
+    assert model.name == "model"
+    assert model.model_id == "chat"
     model.healthcheck()
     embeddings.healthcheck()
     answer = model.generate(system_prompt="system", user_prompt="question")

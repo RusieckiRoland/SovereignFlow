@@ -13,6 +13,7 @@ It is extracted from the architectural lessons of LocalAI-RAG, but it is not a c
 - **PostgreSQL-backed execution audit** — pipeline runs, completed steps, results, and safe failures are stored durably.
 - **Durable operational metrics** — quality, latency, evidence, provider token usage, and configured cost estimates come from PostgreSQL audit records.
 - **Authenticated administration** — execution history, metrics, job inspection, and explicit retry are protected and tenant-scoped.
+- **Fail-closed capability authorization** — Identity Provider claims are mapped to internal groups and versioned PostgreSQL policies before a pipeline can run.
 - **Transactional document ingestion** — source versions, chunks, idempotency keys, and indexing jobs are committed atomically.
 - **Versioned graph relationships** — document relations follow source versions and are traversed with explicit safety limits.
 - **Weaviate for retrieval** — semantic, keyword, and hybrid search use generic document chunks.
@@ -111,6 +112,18 @@ The validator rejects unknown actions, version mismatches, broken transitions, c
 
 There is no implicit action fallback. A routing action must return a route explicitly declared by its step.
 
+Public query requests select a stable `capability_id`, never a pipeline filename or
+domain supplied by the client. The backend resolves:
+
+```text
+verified claims -> internal groups -> capability -> domain -> exact pipeline
+```
+
+The user catalog and every execution use the same current PostgreSQL policy.
+Missing policies, missing mappings, empty grants, and unavailable policy storage
+all deny execution before retrieval or model invocation. See
+`docs/access-policy-api.md`.
+
 ## PostgreSQL execution audit
 
 Database migrations run before the HTTP server opens. Migration checksums are recorded in `public.sovereignflow_schema_migrations`; modifying an already applied migration prevents startup.
@@ -150,6 +163,7 @@ docs/                architecture and extraction decisions
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install -e ".[dev]"
+python -m playwright install chromium
 python -m pytest --cov=sovereignflow --cov-branch
 ```
 
@@ -164,6 +178,7 @@ SovereignFlow has no in-memory or fake runtime mode. The server starts only when
 - prompt files,
 - domain profiles,
 - valid pipeline definitions.
+- the PostgreSQL access-policy schema.
 
 Model generation and embedding calculation are performed by separate HTTP services. They may be local services or external providers exposing compatible endpoints.
 
@@ -293,11 +308,38 @@ If any required dependency or contract is invalid, startup fails.
 
 Runtime endpoints:
 
+- `GET /app/` — optional interactive test console using OIDC Authorization Code Flow with PKCE,
 - `GET /live` — process liveness,
 - `GET /ready` — dependency readiness,
 - `POST /v1/query` — versioned RAG query API.
 - `GET /v1/admin/executions/{request_id}` — authenticated execution details.
 - `GET /v1/admin/metrics` — authenticated operational metrics.
+
+## Interactive test console
+
+SovereignFlow can optionally expose a small, provider-neutral web client for
+manual verification. It is not a domain application and contains no
+domain-specific behavior. The console:
+
+- redirects the browser to the configured OpenID Connect provider;
+- uses Authorization Code Flow with PKCE;
+- stores tokens only in browser session storage;
+- sends the access token to the existing `/v1/query` endpoint;
+- displays the answer, citations, pipeline trace, and permitted diagnostics.
+
+Enable it in the runtime configuration:
+
+```yaml
+web_client:
+  client_id: sovereignflow-web-client
+  authorization_url: http://127.0.0.1:28090/realms/sovereignflow/protocol/openid-connect/auth
+  token_url: http://127.0.0.1:28090/realms/sovereignflow/protocol/openid-connect/token
+  logout_url: http://127.0.0.1:28090/realms/sovereignflow/protocol/openid-connect/logout
+```
+
+The identity provider must register the exact web client redirect URI. The
+development Keycloak realm and local instructions are documented in
+`docs/keycloak-integration.md`.
 - `GET /v1/admin/ingestion/jobs/{job_id}` — authenticated job inspection.
 - `POST /v1/admin/ingestion/jobs/{job_id}/retry` — authenticated explicit retry.
 
@@ -309,6 +351,12 @@ tenant_id=<explicit tenant>
 ```
 
 The full contract is documented in `docs/operations-api.md`.
+
+Query requests require an OIDC/OAuth 2.0 bearer access token. The configured Identity Provider must issue signed JWTs containing the subject, tenant, ACL labels, and classification ceiling. Roles, groups, external-model permission, and diagnostic permission are configurable claims. Clients cannot provide these security values in the JSON body.
+
+An optional Keycloak development realm and real integration test are documented in
+`docs/keycloak-integration.md`. Keycloak runs under the Docker Compose `identity`
+profile and is not a mandatory runtime dependency.
 
 ### 8. Verify health
 
@@ -340,6 +388,7 @@ Expected readiness response:
 curl --fail-with-body \
   -X POST http://127.0.0.1:8000/v1/query \
   -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer ${SOVEREIGNFLOW_ACCESS_TOKEN}" \
   -H 'X-Request-ID: example-request-001' \
   -d '{
     "query": "What does the indexed source say?",
@@ -357,6 +406,14 @@ The response contains:
 - request, domain, and session identifiers.
 
 The execution and each completed pipeline step are also recorded in PostgreSQL.
+
+An authorized diagnostic request can additionally send:
+
+```text
+X-SovereignFlow-Diagnostics: true
+```
+
+The token must contain the configured diagnostic permission. The response then includes a safe, versioned trace of retrieval ranks, graph metadata, context chunk identifiers, limits, model identity, prompt hash, token usage, and pipeline steps. It does not expose the full prompt or hidden document content.
 
 ### 10. Inspect operational metrics
 
@@ -382,24 +439,28 @@ Run protocol integration tests; tests requiring external services are skipped un
 python -m pytest -m integration
 ```
 
-To include the real PostgreSQL and Weaviate ingestion tests, start both services and provide their connection settings:
+To include the real PostgreSQL, Weaviate, and Keycloak integration tests, start the
+services and provide their connection settings:
 
 ```bash
-export WEAVIATE_API_KEY='test-weaviate-key'
-export POSTGRES_PASSWORD='test-password'
+export WEAVIATE_API_KEY='sovereignflow-test-key'
+export POSTGRES_PASSWORD='sovereignflow-test-password'
+export KEYCLOAK_ADMIN_PASSWORD='sovereignflow-admin-test'
 export SOVEREIGNFLOW_POSTGRES_PORT=25432
 export SOVEREIGNFLOW_WEAVIATE_HTTP_PORT=28080
 export SOVEREIGNFLOW_WEAVIATE_GRPC_PORT=25005
-docker compose up -d postgres weaviate
+export SOVEREIGNFLOW_KEYCLOAK_PORT=28090
+docker compose --profile identity up -d postgres weaviate keycloak
 
-export SOVEREIGNFLOW_TEST_POSTGRES_URL='postgresql://sovereignflow:test-password@127.0.0.1:25432/sovereignflow'
+export SOVEREIGNFLOW_TEST_POSTGRES_URL='postgresql://sovereignflow:sovereignflow-test-password@127.0.0.1:25432/sovereignflow'
 export SOVEREIGNFLOW_TEST_WEAVIATE_HOST='127.0.0.1'
 export SOVEREIGNFLOW_TEST_WEAVIATE_HTTP_PORT=28080
 export SOVEREIGNFLOW_TEST_WEAVIATE_GRPC_PORT=25005
 export SOVEREIGNFLOW_TEST_WEAVIATE_API_KEY="$WEAVIATE_API_KEY"
+export SOVEREIGNFLOW_TEST_KEYCLOAK_URL='http://127.0.0.1:28090'
 python -m pytest -m integration
 
-docker compose down
+docker compose --profile identity down
 ```
 
 Run static quality checks:

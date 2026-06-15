@@ -107,6 +107,7 @@ def _load_queries(path: Path) -> dict[str, dict[str, Any]]:
         for field in (
             "query_type",
             "query",
+            "capability_id",
             "tenant_id",
             "domain",
             "search_mode",

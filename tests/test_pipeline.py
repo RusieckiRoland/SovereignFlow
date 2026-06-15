@@ -9,6 +9,7 @@ from conftest import (
     StubModel,
     StubPrompts,
     StubRetrieval,
+    authorization_context,
     default_pipeline,
 )
 
@@ -27,6 +28,7 @@ from sovereignflow.domain import (
     ProviderProtocolError,
     QueryCommand,
 )
+from sovereignflow.infrastructure import YamlPipelineRepository
 
 
 class Action:
@@ -152,8 +154,71 @@ def test_pipeline_validator_accepts_default_pipeline() -> None:
     PipelineValidator(default_action_registry()).validate(default_pipeline())
 
 
+def test_repository_loads_three_distinct_supported_pipelines() -> None:
+    repository = YamlPipelineRepository("pipelines")
+    validator = PipelineValidator(default_action_registry())
+
+    loaded = {name: repository.load(name) for name in ("direct", "graph", "strict")}
+    for pipeline in loaded.values():
+        validator.validate(pipeline)
+
+    assert tuple(step.action for step in loaded["direct"].steps) == (
+        "normalize_query",
+        "retrieve",
+        "build_context",
+        "call_model",
+        "finalize",
+    )
+    assert "expand_graph" in tuple(step.action for step in loaded["graph"].steps)
+    assert "require_evidence" in tuple(step.action for step in loaded["strict"].steps)
+
+
+def test_strict_pipeline_refuses_to_call_model_without_evidence(domain_profile) -> None:
+    model = StubModel()
+    context = PipelineContext(
+        command=QueryCommand("request", "question", "general", "session", authorization_context()),
+        domain=domain_profile,
+        retrieval=StubRetrieval(),
+        graph=StubGraph(),
+        model=model,
+        prompts=StubPrompts(),
+    )
+    pipeline = YamlPipelineRepository("pipelines").load("strict")
+
+    with pytest.raises(PipelineExecutionError, match="requires retrieved evidence"):
+        PipelineEngine(
+            registry=default_action_registry(),
+            audit=StubAudit(),
+            run_id_factory=lambda: "00000000-0000-0000-0000-000000000006",
+        ).execute(pipeline, context)
+
+    assert model.calls == []
+
+
+def test_strict_pipeline_calls_model_when_evidence_exists(domain_profile, search_hit) -> None:
+    model = StubModel(answer="grounded")
+    context = PipelineContext(
+        command=QueryCommand("request", "question", "general", "session", authorization_context()),
+        domain=domain_profile,
+        retrieval=StubRetrieval((search_hit,)),
+        graph=StubGraph(),
+        model=model,
+        prompts=StubPrompts(),
+    )
+    pipeline = YamlPipelineRepository("pipelines").load("strict")
+
+    result = PipelineEngine(
+        registry=default_action_registry(),
+        audit=StubAudit(),
+        run_id_factory=lambda: "00000000-0000-0000-0000-000000000007",
+    ).execute(pipeline, context)
+
+    assert result.answer.startswith("grounded")
+    assert len(model.calls) == 1
+
+
 def test_pipeline_engine_records_safe_known_and_unknown_failures(domain_profile) -> None:
-    command = QueryCommand("request", "question", "general", "session")
+    command = QueryCommand("request", "question", "general", "session", authorization_context())
     context = PipelineContext(
         command=command,
         domain=domain_profile,
@@ -207,7 +272,7 @@ def test_pipeline_engine_enforces_runtime_step_limit(domain_profile) -> None:
         run_id_factory=lambda: "00000000-0000-0000-0000-000000000004",
     )
     context = PipelineContext(
-        command=QueryCommand("request", "question", "general", "session"),
+        command=QueryCommand("request", "question", "general", "session", authorization_context()),
         domain=domain_profile,
         retrieval=StubRetrieval(),
         graph=StubGraph(),
@@ -241,7 +306,7 @@ def test_pipeline_engine_executes_explicit_route(domain_profile) -> None:
     PipelineValidator(registry).validate(pipeline)
     audit = StubAudit()
     context = PipelineContext(
-        command=QueryCommand("request", "question", "general", "session"),
+        command=QueryCommand("request", "question", "general", "session", authorization_context()),
         domain=domain_profile,
         retrieval=StubRetrieval(),
         graph=StubGraph(),
@@ -290,7 +355,7 @@ def test_pipeline_engine_rejects_invalid_route_decisions(
         *(() if terminal else (step("end"),)),
     )
     context = PipelineContext(
-        command=QueryCommand("request", "question", "general", "session"),
+        command=QueryCommand("request", "question", "general", "session", authorization_context()),
         domain=domain_profile,
         retrieval=StubRetrieval(),
         graph=StubGraph(),

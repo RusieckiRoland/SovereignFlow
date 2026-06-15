@@ -61,9 +61,12 @@ def _execute_query(
 ) -> Mapping[str, Any]:
     query_id = require_string(query, "query_id", context)
     payload = _request_payload(query, context)
-    headers = {"Content-Type": "application/json", "Accept": "application/json"}
-    if config.diagnostic_key is not None:
-        headers["X-SovereignFlow-Diagnostic-Key"] = config.diagnostic_key
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Authorization": f"Bearer {config.access_token}",
+        "X-SovereignFlow-Diagnostics": "true",
+    }
     request = Request(
         config.endpoint,
         data=json.dumps(payload, separators=(",", ":")).encode("utf-8"),
@@ -127,7 +130,7 @@ def _execute_query(
 def _request_payload(query: dict[str, Any], context: str) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "query": require_string(query, "query", context),
-        "domain": require_string(query, "domain", context),
+        "capability_id": require_string(query, "capability_id", context),
         "session_id": require_string(query, "query_id", context),
     }
     filters = query.get("filters")
@@ -149,8 +152,10 @@ def _success_result(
         not isinstance(item, dict) for item in citations_value
     ):
         raise ContractError("response.citations must be a list of objects")
-    if not isinstance(trace_value, list) or any(not isinstance(item, dict) for item in trace_value):
-        raise ContractError("response.pipeline_trace must be a list of objects")
+    if not isinstance(trace_value, list) or any(
+        not isinstance(item, str | dict) for item in trace_value
+    ):
+        raise ContractError("response.pipeline_trace must be a list of strings or objects")
     retrieval_trace = _normalize_retrieval_trace(response.get("retrieval_trace"))
     usage = _normalize_usage(response.get("usage"))
     return {
@@ -161,7 +166,9 @@ def _success_result(
         "ok": True,
         "answer": require_string(response, "answer", "response"),
         "citations": [_normalize_evidence(item, "response.citations") for item in citations_value],
-        "pipeline_trace": trace_value,
+        "pipeline_trace": [
+            {"step_id": item} if isinstance(item, str) else item for item in trace_value
+        ],
         "retrieval_trace": retrieval_trace,
         "usage": usage,
         "error": None,
@@ -266,3 +273,5 @@ def _validate_execution_config(config: ExecutionConfig) -> None:
         raise ContractError("timeout_seconds must be greater than zero")
     if not config.endpoint.startswith(("http://", "https://")):
         raise ContractError("endpoint must use http or https")
+    if not config.access_token.strip():
+        raise ContractError("access_token is required")

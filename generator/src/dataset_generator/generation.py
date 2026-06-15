@@ -488,6 +488,7 @@ def query_records(
             "query_id": f"query_{query_index + 1:06d}",
             "query_type": query_type,
             "query": QUERY_VARIANTS[query_type].format(domain=domain),
+            "capability_id": f"rag-query:{domain}",
             "tenant_id": tenant,
             "domain": domain,
             "search_mode": query_rng.choice(("semantic", "bm25", "hybrid")),

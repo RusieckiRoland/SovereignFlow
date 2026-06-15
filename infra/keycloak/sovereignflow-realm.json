@@ -1,0 +1,419 @@
+{
+  "realm": "sovereignflow",
+  "enabled": true,
+  "displayName": "SovereignFlow Integration",
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "resetPasswordAllowed": false,
+  "loginWithEmailAllowed": false,
+  "clients": [
+    {
+      "clientId": "sovereignflow-integration-client",
+      "name": "SovereignFlow Integration Client",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "protocol": "openid-connect",
+      "fullScopeAllowed": true,
+      "protocolMappers": [
+        {
+          "name": "sovereignflow-api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "sovereignflow-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        },
+        {
+          "name": "tenant-id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "tenant_id",
+            "claim.name": "tenant_id",
+            "jsonType.label": "String",
+            "multivalued": "false",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "sovereignflow_roles",
+            "claim.name": "roles",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "groups",
+            "full.path": "false",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "acl-labels",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "acl_labels",
+            "claim.name": "acl_labels",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "classification",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "max_classification_level",
+            "claim.name": "max_classification_level",
+            "jsonType.label": "long",
+            "multivalued": "false",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "external-model",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "allow_external_model",
+            "claim.name": "allow_external_model",
+            "jsonType.label": "boolean",
+            "multivalued": "false",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "diagnostics",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "sovereignflow_diagnostics",
+            "claim.name": "sovereignflow_diagnostics",
+            "jsonType.label": "boolean",
+            "multivalued": "false",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "sovereignflow-web-client",
+      "name": "SovereignFlow Test Console",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "protocol": "openid-connect",
+      "fullScopeAllowed": true,
+      "redirectUris": [
+        "http://127.0.0.1:8000/app/",
+        "http://localhost:8000/app/"
+      ],
+      "webOrigins": [
+        "http://127.0.0.1:8000",
+        "http://localhost:8000"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://127.0.0.1:8000/app/##http://localhost:8000/app/"
+      },
+      "protocolMappers": [
+        {
+          "name": "sovereignflow-api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "sovereignflow-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        },
+        {
+          "name": "tenant-id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "tenant_id",
+            "claim.name": "tenant_id",
+            "jsonType.label": "String",
+            "multivalued": "false",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "sovereignflow_roles",
+            "claim.name": "roles",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "groups",
+            "full.path": "false",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "acl-labels",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "acl_labels",
+            "claim.name": "acl_labels",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "classification",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "max_classification_level",
+            "claim.name": "max_classification_level",
+            "jsonType.label": "long",
+            "multivalued": "false",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "external-model",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "allow_external_model",
+            "claim.name": "allow_external_model",
+            "jsonType.label": "boolean",
+            "multivalued": "false",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "diagnostics",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "sovereignflow_diagnostics",
+            "claim.name": "sovereignflow_diagnostics",
+            "jsonType.label": "boolean",
+            "multivalued": "false",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "sovereignflow-api",
+      "name": "SovereignFlow API Audience",
+      "enabled": true,
+      "publicClient": false,
+      "bearerOnly": true,
+      "protocol": "openid-connect"
+    }
+  ],
+  "groups": [
+    {"name": "integration"},
+    {"name": "restricted"},
+    {"name": "direct-users"},
+    {"name": "graph-users"},
+    {"name": "strict-users"}
+  ],
+  "users": [
+    {
+      "username": "integration-user",
+      "enabled": true,
+      "firstName": "Integration",
+      "lastName": "User",
+      "email": "integration-user@sovereignflow.test",
+      "emailVerified": true,
+      "requiredActions": [],
+      "groups": ["/integration"],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "stage2-test-password",
+          "temporary": false
+        }
+      ],
+      "attributes": {
+        "tenant_id": ["tenant_0001"],
+        "sovereignflow_roles": ["rag-user"],
+        "acl_labels": ["public", "internal", "restricted"],
+        "max_classification_level": ["3"],
+        "allow_external_model": ["true"],
+        "sovereignflow_diagnostics": ["true"]
+      }
+    },
+    {
+      "username": "restricted-user",
+      "enabled": true,
+      "firstName": "Restricted",
+      "lastName": "User",
+      "email": "restricted-user@sovereignflow.test",
+      "emailVerified": true,
+      "requiredActions": [],
+      "groups": ["/restricted"],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "stage2-test-password",
+          "temporary": false
+        }
+      ],
+      "attributes": {
+        "tenant_id": ["tenant_0001"],
+        "sovereignflow_roles": ["rag-user"],
+        "acl_labels": ["public"],
+        "max_classification_level": ["1"],
+        "allow_external_model": ["false"],
+        "sovereignflow_diagnostics": ["false"]
+      }
+    },
+    {
+      "username": "direct-user",
+      "enabled": true,
+      "firstName": "Direct",
+      "lastName": "Pipeline",
+      "email": "direct-user@sovereignflow.test",
+      "emailVerified": true,
+      "requiredActions": [],
+      "groups": ["/direct-users"],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "stage2-test-password",
+          "temporary": false
+        }
+      ],
+      "attributes": {
+        "tenant_id": ["tenant_0001"],
+        "sovereignflow_roles": ["rag-user"],
+        "acl_labels": ["public"],
+        "max_classification_level": ["1"],
+        "allow_external_model": ["false"],
+        "sovereignflow_diagnostics": ["true"]
+      }
+    },
+    {
+      "username": "graph-user",
+      "enabled": true,
+      "firstName": "Graph",
+      "lastName": "Pipeline",
+      "email": "graph-user@sovereignflow.test",
+      "emailVerified": true,
+      "requiredActions": [],
+      "groups": ["/graph-users"],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "stage2-test-password",
+          "temporary": false
+        }
+      ],
+      "attributes": {
+        "tenant_id": ["tenant_0001"],
+        "sovereignflow_roles": ["rag-user"],
+        "acl_labels": ["public", "internal"],
+        "max_classification_level": ["2"],
+        "allow_external_model": ["false"],
+        "sovereignflow_diagnostics": ["true"]
+      }
+    },
+    {
+      "username": "strict-user",
+      "enabled": true,
+      "firstName": "Strict",
+      "lastName": "Pipeline",
+      "email": "strict-user@sovereignflow.test",
+      "emailVerified": true,
+      "requiredActions": [],
+      "groups": ["/strict-users"],
+      "credentials": [
+        {
+          "type": "password",
+          "value": "stage2-test-password",
+          "temporary": false
+        }
+      ],
+      "attributes": {
+        "tenant_id": ["tenant_0001"],
+        "sovereignflow_roles": ["rag-user"],
+        "acl_labels": ["public", "internal", "restricted"],
+        "max_classification_level": ["3"],
+        "allow_external_model": ["true"],
+        "sovereignflow_diagnostics": ["true"]
+      }
+    }
+  ]
+}

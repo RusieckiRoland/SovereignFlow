@@ -23,8 +23,8 @@ class ExecutionConfig:
     output_path: Path
     endpoint: str
     timeout_seconds: float
+    access_token: str
     overwrite: bool = False
-    diagnostic_key: str | None = None
 
 
 @dataclass(frozen=True)

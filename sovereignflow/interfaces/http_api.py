@@ -3,14 +3,29 @@ from __future__ import annotations
 import hmac
 import uuid
 from collections.abc import Mapping, Sequence
-from typing import Any
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, cast
+from urllib.parse import urlsplit
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, redirect, request, send_from_directory
+from werkzeug.exceptions import HTTPException
 
-from sovereignflow.application import HealthProbe, OperationsService, RagQueryService
+from sovereignflow.application import (
+    AuthenticationPort,
+    HealthProbe,
+    OperationsService,
+    PipelineAuthorizationService,
+    PolicyAdministrationService,
+    RagQueryService,
+)
 from sovereignflow.domain import (
+    AccessPolicyBundle,
     AuthenticationError,
+    CapabilityDescriptor,
+    ClaimGroupMapping,
     DomainNotFoundError,
+    GroupCapabilityGrant,
     QueryCommand,
     SovereignFlowError,
     ValidationError,
@@ -18,18 +33,70 @@ from sovereignflow.domain import (
 
 
 class QueryDispatcher:
-    def __init__(self, services: Mapping[str, RagQueryService]) -> None:
-        self._services = dict(services)
+    def __init__(
+        self,
+        services: Mapping[str | tuple[str, str], RagQueryService],
+        authorization: PipelineAuthorizationService | None = None,
+        *,
+        default_pipelines: Mapping[str, str] | None = None,
+    ) -> None:
+        self._services: dict[tuple[str, str], RagQueryService] = {}
+        inferred_defaults: dict[str, str] = {}
+        for key, service in services.items():
+            if isinstance(key, tuple):
+                domain, pipeline_name = key
+            else:
+                domain, pipeline_name = key, "default"
+            self._services[(domain, pipeline_name)] = service
+            inferred_defaults.setdefault(domain, pipeline_name)
+        self._default_pipelines = {**inferred_defaults, **dict(default_pipelines or {})}
+        self._authorization = authorization
 
     @property
     def domains(self) -> tuple[str, ...]:
-        return tuple(sorted(self._services))
+        return tuple(sorted(self._default_pipelines))
 
-    def execute(self, command: QueryCommand):
-        service = self._services.get(command.domain)
+    @property
+    def requires_capability(self) -> bool:
+        return self._authorization is not None
+
+    def catalog(self, authorization):
+        return () if self._authorization is None else self._authorization.catalog(authorization)
+
+    def execute(self, command: QueryCommand, *, capability_id: str | None = None):
+        if self._authorization is None:
+            pipeline_name = self._default_pipelines.get(command.domain)
+            service = self._services.get((command.domain, str(pipeline_name)))
+        else:
+            decision = self._authorization.authorize(
+                request_id=command.request_id,
+                capability_id=str(capability_id or ""),
+                authorization=command.authorization,
+                diagnostics_requested=command.diagnostics_requested,
+            )
+            capability = cast(CapabilityDescriptor, decision.capability)
+            domain = capability.domain
+            service = self._services.get((domain, capability.pipeline_name))
+            command = QueryCommand(
+                request_id=command.request_id,
+                query=command.query,
+                domain=domain,
+                session_id=command.session_id,
+                authorization=command.authorization,
+                filters=command.filters,
+                diagnostics_requested=command.diagnostics_requested,
+            )
         if service is None:
-            raise DomainNotFoundError(f"Unknown domain: {command.domain}")
+            raise DomainNotFoundError("The requested capability is not available")
         return service.execute(command)
+
+
+@dataclass(frozen=True)
+class WebClientConfiguration:
+    client_id: str
+    authorization_url: str
+    token_url: str
+    logout_url: str
 
 
 def create_app(
@@ -37,11 +104,15 @@ def create_app(
     readiness_probes: Sequence[HealthProbe],
     operations: OperationsService,
     admin_api_key: str,
+    authenticator: AuthenticationPort,
+    web_client: WebClientConfiguration | None = None,
+    policy_administration: PolicyAdministrationService | None = None,
 ) -> Flask:
     app = Flask(__name__)
     probes = tuple(readiness_probes)
     if not admin_api_key:
         raise ValidationError("admin_api_key is required")
+    web_root = Path(__file__).with_name("web")
 
     def authenticate_admin() -> None:
         supplied = str(request.headers.get("X-SovereignFlow-Admin-Key") or "")
@@ -50,6 +121,13 @@ def create_app(
 
     def tenant_id() -> str:
         return str(request.args.get("tenant_id") or "").strip()
+
+    def authenticate_query():
+        authorization = str(request.headers.get("Authorization") or "").strip()
+        scheme, separator, token = authorization.partition(" ")
+        if separator != " " or scheme.lower() != "bearer" or not token.strip():
+            raise AuthenticationError("Bearer access token is required")
+        return authenticator.authenticate(token.strip())
 
     @app.get("/live")
     def live() -> Any:
@@ -68,11 +146,68 @@ def create_app(
                 healthy = False
         return jsonify({"ok": healthy, "components": components}), 200 if healthy else 503
 
+    if web_client is not None:
+
+        @app.get("/")
+        def web_root_redirect() -> Any:
+            return redirect("/app/")
+
+        @app.get("/app")
+        def web_redirect() -> Any:
+            return redirect("/app/")
+
+        @app.get("/app/")
+        def web_index() -> Any:
+            return _secure_web_response(
+                send_from_directory(web_root, "index.html"),
+                web_client,
+            )
+
+        @app.get("/app/config.json")
+        def web_configuration() -> Any:
+            response = jsonify(
+                {
+                    "api_url": "/v1/query",
+                    "client_id": web_client.client_id,
+                    "authorization_url": web_client.authorization_url,
+                    "token_url": web_client.token_url,
+                    "logout_url": web_client.logout_url,
+                    "domains": list(dispatcher.domains),
+                }
+            )
+            response.headers["Cache-Control"] = "no-store"
+            return _secure_web_response(response, web_client)
+
+        @app.get("/app/assets/<path:filename>")
+        def web_asset(filename: str) -> Any:
+            return _secure_web_response(
+                send_from_directory(web_root / "assets", filename),
+                web_client,
+            )
+
     @app.post("/v1/query")
     def query() -> Any:
         payload = request.get_json(silent=True)
         if not isinstance(payload, dict):
             raise ValidationError("Request body must be a JSON object")
+        forbidden_security_fields = {
+            "tenant_id",
+            "acl_labels",
+            "max_classification_level",
+            "roles",
+            "groups",
+            "allow_external_model",
+            "diagnostic_access",
+        }.intersection(payload)
+        if dispatcher.requires_capability:
+            forbidden_security_fields.update(
+                {"domain", "pipeline_id", "pipeline_name"}.intersection(payload)
+            )
+        if forbidden_security_fields:
+            raise ValidationError(
+                "Security context cannot be supplied in request body: "
+                + ", ".join(sorted(forbidden_security_fields))
+            )
         request_id = str(request.headers.get("X-Request-ID") or "").strip() or str(uuid.uuid4())
         filters = payload.get("filters")
         if filters is None:
@@ -83,32 +218,95 @@ def create_app(
             QueryCommand(
                 request_id=request_id,
                 query=str(payload.get("query") or ""),
-                domain=str(payload.get("domain") or ""),
+                domain=(
+                    "pending-authorization"
+                    if dispatcher.requires_capability
+                    else str(payload.get("domain") or "")
+                ),
                 session_id=str(payload.get("session_id") or ""),
+                authorization=authenticate_query(),
                 filters=filters,
-            )
+                diagnostics_requested=(
+                    str(request.headers.get("X-SovereignFlow-Diagnostics") or "").lower() == "true"
+                ),
+            ),
+            capability_id=(
+                str(payload.get("capability_id") or "") if dispatcher.requires_capability else None
+            ),
         )
+        response = {
+            "ok": True,
+            "request_id": result.request_id,
+            "answer": result.answer,
+            "domain": result.domain,
+            "session_id": result.session_id,
+            "citations": [
+                {
+                    "source_id": citation.source_id,
+                    "chunk_id": citation.chunk_id,
+                    "source_uri": citation.source_uri,
+                    "score": citation.score,
+                    "score_type": citation.score_type,
+                    "metadata": dict(citation.metadata),
+                }
+                for citation in result.citations
+            ],
+            "pipeline_trace": list(result.pipeline_trace),
+        }
+        if (
+            result.diagnostics is not None
+            and str(request.headers.get("X-SovereignFlow-Diagnostics") or "").lower() == "true"
+        ):
+            response["diagnostics"] = _serialize_diagnostics(result.diagnostics)
+            response["retrieval_trace"] = _serialize_retrieval_trace(result.diagnostics)
+            response["usage"] = {
+                "prompt_tokens": result.diagnostics.prompt_tokens,
+                "completion_tokens": result.diagnostics.completion_tokens,
+                "total_tokens": (
+                    result.diagnostics.prompt_tokens + result.diagnostics.completion_tokens
+                ),
+                "cost": None,
+            }
+        return jsonify(response)
+
+    @app.get("/v1/catalog")
+    def catalog() -> Any:
         return jsonify(
             {
                 "ok": True,
-                "request_id": result.request_id,
-                "answer": result.answer,
-                "domain": result.domain,
-                "session_id": result.session_id,
-                "citations": [
+                "capabilities": [
                     {
-                        "source_id": citation.source_id,
-                        "chunk_id": citation.chunk_id,
-                        "source_uri": citation.source_uri,
-                        "score": citation.score,
-                        "score_type": citation.score_type,
-                        "metadata": dict(citation.metadata),
+                        "capability_id": item.capability_id,
+                        "display_name": item.display_name,
+                        "description": item.description,
+                        "domain": item.domain,
+                        "pipeline_name": item.pipeline_name,
+                        "diagnostics_available": item.diagnostics_available,
+                        "external_model": item.external_model,
+                        "policy_version": item.policy_version,
                     }
-                    for citation in result.citations
+                    for item in dispatcher.catalog(authenticate_query())
                 ],
-                "pipeline_trace": list(result.pipeline_trace),
             }
         )
+
+    if policy_administration is not None:
+
+        @app.put("/v1/admin/access-policies/<tenant_id>")
+        def publish_access_policy(tenant_id: str) -> Any:
+            authenticate_admin()
+            payload = request.get_json(silent=True)
+            if not isinstance(payload, dict):
+                raise ValidationError("Request body must be a JSON object")
+            bundle, expected_version = _parse_policy_bundle(tenant_id, payload)
+            policy_administration.publish(bundle, expected_version=expected_version)
+            return jsonify(
+                {
+                    "ok": True,
+                    "tenant_id": bundle.tenant_id,
+                    "policy_version": bundle.version,
+                }
+            )
 
     @app.get("/v1/admin/executions/<request_id>")
     def execution(request_id: str) -> Any:
@@ -169,6 +367,24 @@ def create_app(
             error.http_status,
         )
 
+    @app.errorhandler(HTTPException)
+    def handle_http_error(error: HTTPException) -> Any:
+        request_id = str(request.headers.get("X-Request-ID") or "").strip() or str(uuid.uuid4())
+        code = str(error.name or "http_error").lower().replace(" ", "_")
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": {
+                        "code": code,
+                        "message": str(error.description),
+                        "request_id": request_id,
+                    },
+                }
+            ),
+            error.code or 500,
+        )
+
     @app.errorhandler(Exception)
     def handle_unexpected_error(error: Exception) -> Any:
         app.logger.exception("Unhandled request error", exc_info=error)
@@ -188,3 +404,183 @@ def create_app(
         )
 
     return app
+
+
+def _secure_web_response(response, configuration: WebClientConfiguration):
+    identity_origins = sorted(
+        {
+            f"{parts.scheme}://{parts.netloc}"
+            for url in (
+                configuration.authorization_url,
+                configuration.token_url,
+                configuration.logout_url,
+            )
+            if (parts := urlsplit(url)).scheme in {"http", "https"} and parts.netloc
+        }
+    )
+    connect_sources = " ".join(["'self'", *identity_origins])
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self'; "
+        "style-src 'self'; "
+        "img-src 'self' data:; "
+        f"connect-src {connect_sources}; "
+        "frame-ancestors 'none'; "
+        "base-uri 'none'; "
+        "form-action 'self'"
+    )
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    return response
+
+
+def _serialize_diagnostics(diagnostics) -> dict[str, Any]:
+    return {
+        "contract_version": diagnostics.contract_version,
+        "subject_hash": diagnostics.subject_hash,
+        "tenant_id": diagnostics.tenant_id,
+        "allowed_acl_labels": list(diagnostics.allowed_acl_labels),
+        "max_classification_level": diagnostics.max_classification_level,
+        "search_mode": diagnostics.search_mode.value,
+        "retrieval": [
+            {
+                "chunk_id": item.chunk_id,
+                "source_id": item.source_id,
+                "score": item.score,
+                "score_type": item.score_type,
+                "rank": item.rank,
+                "origin": item.origin,
+                "graph_depth": item.graph_depth,
+                "graph_path": list(item.graph_path),
+            }
+            for item in diagnostics.retrieval
+        ],
+        "omitted_chunk_ids": list(diagnostics.omitted_chunk_ids),
+        "context_chunk_ids": list(diagnostics.context_chunk_ids),
+        "context_characters": diagnostics.context_characters,
+        "provider": diagnostics.provider,
+        "model": diagnostics.model,
+        "system_prompt_hash": diagnostics.system_prompt_hash,
+        "prompt_tokens": diagnostics.prompt_tokens,
+        "completion_tokens": diagnostics.completion_tokens,
+        "model_duration_ms": diagnostics.model_duration_ms,
+        "pipeline_trace": list(diagnostics.pipeline_trace),
+    }
+
+
+def _serialize_retrieval_trace(diagnostics) -> dict[str, Any]:
+    return {
+        "contract_version": diagnostics.contract_version,
+        "seed_nodes": [
+            {
+                "chunk_id": item.chunk_id,
+                "source_id": item.source_id,
+                "rank": item.rank,
+                "metadata": {"origin": item.origin},
+            }
+            for item in diagnostics.retrieval
+            if item.origin == "seed"
+        ],
+        "graph_nodes": [
+            {
+                "chunk_id": item.chunk_id,
+                "source_id": item.source_id,
+                "rank": item.rank,
+                "metadata": {
+                    "origin": item.origin,
+                    "graph_depth": item.graph_depth,
+                    "graph_path": list(item.graph_path),
+                },
+            }
+            for item in diagnostics.retrieval
+            if item.origin == "graph"
+        ],
+        "relationship_types": sorted(
+            {
+                relationship_type
+                for item in diagnostics.retrieval
+                for relationship_type in item.graph_path
+            }
+        ),
+    }
+
+
+def _parse_policy_bundle(
+    tenant_id: str,
+    payload: dict[str, Any],
+) -> tuple[AccessPolicyBundle, int | None]:
+    expected_version_value = payload.get("expected_version")
+    if expected_version_value is not None and (
+        isinstance(expected_version_value, bool) or not isinstance(expected_version_value, int)
+    ):
+        raise ValidationError("expected_version must be an integer or null")
+    version = _required_positive_integer(payload, "version")
+    groups = _required_string_list(payload, "groups")
+    mappings = _required_object_list(payload, "claim_mappings")
+    capabilities = _required_object_list(payload, "capabilities")
+    grants = _required_object_list(payload, "grants")
+    return (
+        AccessPolicyBundle(
+            tenant_id=tenant_id,
+            version=version,
+            group_ids=tuple(groups),
+            claim_mappings=tuple(
+                ClaimGroupMapping(
+                    claim_name=str(item.get("claim_name") or ""),
+                    claim_value=str(item.get("claim_value") or ""),
+                    group_id=str(item.get("group_id") or ""),
+                )
+                for item in mappings
+            ),
+            capabilities=tuple(
+                CapabilityDescriptor(
+                    capability_id=str(item.get("capability_id") or ""),
+                    display_name=str(item.get("display_name") or ""),
+                    description=str(item.get("description") or ""),
+                    domain=str(item.get("domain") or ""),
+                    pipeline_name=str(item.get("pipeline_name") or ""),
+                    diagnostics_available=_required_boolean(item, "diagnostics_available"),
+                    external_model=_required_boolean(item, "external_model"),
+                    policy_version=version,
+                )
+                for item in capabilities
+            ),
+            grants=tuple(
+                GroupCapabilityGrant(
+                    group_id=str(item.get("group_id") or ""),
+                    capability_id=str(item.get("capability_id") or ""),
+                )
+                for item in grants
+            ),
+        ),
+        expected_version_value,
+    )
+
+
+def _required_positive_integer(payload: dict[str, Any], field: str) -> int:
+    value = payload.get(field)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValidationError(f"{field} must be a positive integer")
+    return value
+
+
+def _required_string_list(payload: dict[str, Any], field: str) -> list[str]:
+    value = payload.get(field)
+    if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+        raise ValidationError(f"{field} must be a list of strings")
+    return value
+
+
+def _required_object_list(payload: dict[str, Any], field: str) -> list[dict[str, Any]]:
+    value = payload.get(field)
+    if not isinstance(value, list) or any(not isinstance(item, dict) for item in value):
+        raise ValidationError(f"{field} must be a list of objects")
+    return value
+
+
+def _required_boolean(payload: dict[str, Any], field: str) -> bool:
+    value = payload.get(field)
+    if not isinstance(value, bool):
+        raise ValidationError(f"{field} must be a boolean")
+    return value

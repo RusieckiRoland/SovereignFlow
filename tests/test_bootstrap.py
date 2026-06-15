@@ -16,11 +16,13 @@ from sovereignflow.bootstrap.application import (
 from sovereignflow.bootstrap.config import (
     AdminSettings,
     EmbeddingSettings,
+    IdentityProviderSettings,
     ModelSettings,
     PostgreSQLSettings,
     ServerSettings,
     SovereignFlowSettings,
     WeaviateSettings,
+    WebClientSettings,
 )
 from sovereignflow.bootstrap.import_application import bootstrap_import
 from sovereignflow.domain import (
@@ -114,6 +116,30 @@ class GraphTraversal(IngestionRepository):
     name = "graph_traversal"
 
 
+class AccessPolicies(IngestionRepository):
+    name = "access_policies"
+
+    def resolve(self, authorization):
+        raise AssertionError("not called")
+
+    def capabilities(self, policy):
+        return ()
+
+    def capability(self, capability_id, *, policy):
+        return None
+
+    def publish(self, bundle, *, expected_version) -> None:
+        return None
+
+
+class SecurityDecisionAudit:
+    def __init__(self, *args, **kwargs) -> None:
+        return None
+
+    def record(self, **values) -> None:
+        return None
+
+
 class CollectionMigrator:
     def __init__(self, client) -> None:
         self.client = client
@@ -145,6 +171,21 @@ def settings(tmp_path: Path) -> SovereignFlowSettings:
             0.0,
         ),
         admin=AdminSettings("admin-secret"),
+        identity_provider=IdentityProviderSettings(
+            issuer="https://identity.test",
+            audience="sovereignflow",
+            jwks_url="https://identity.test/jwks",
+            algorithms=("RS256",),
+            timeout_seconds=5,
+            cache_ttl_seconds=300,
+            tenant_claim="tenant_id",
+            roles_claim="roles",
+            groups_claim="groups",
+            acl_claim="acl_labels",
+            classification_claim="max_classification_level",
+            external_model_claim="allow_external_model",
+            diagnostic_claim="sovereignflow_diagnostics",
+        ),
         prompts_root=tmp_path,
         pipelines_root=tmp_path,
         domains=(
@@ -201,6 +242,14 @@ def test_bootstrap_builds_and_validates_complete_application(monkeypatch, tmp_pa
         GraphTraversal,
     )
     monkeypatch.setattr(
+        "sovereignflow.bootstrap.application.PostgreSQLAccessPolicyRepository",
+        AccessPolicies,
+    )
+    monkeypatch.setattr(
+        "sovereignflow.bootstrap.application.PostgreSQLSecurityDecisionAudit",
+        SecurityDecisionAudit,
+    )
+    monkeypatch.setattr(
         "sovereignflow.bootstrap.application.WeaviateCollectionMigrator",
         CollectionMigrator,
     )
@@ -221,9 +270,22 @@ def test_bootstrap_builds_and_validates_complete_application(monkeypatch, tmp_pa
         lambda *args, **kwargs: _GatewayHealthProbe("postgresql", Healthy()),
     )
 
-    application = bootstrap(settings(tmp_path))
+    configured = settings(tmp_path)
+    configured = SovereignFlowSettings(
+        **{
+            **configured.__dict__,
+            "web_client": WebClientSettings(
+                client_id="web-client",
+                authorization_url="https://identity.test/authorize",
+                token_url="https://identity.test/token",
+                logout_url="https://identity.test/logout",
+            ),
+        }
+    )
+    application = bootstrap(configured)
 
     assert application.app.test_client().get("/live").status_code == 200
+    assert application.app.test_client().get("/app/").status_code == 200
     assert set(application.ingestion_services) == {"general"}
     application.close()
     assert client.closed == 1
@@ -271,6 +333,14 @@ def test_bootstrap_closes_client_when_construction_fails(monkeypatch, tmp_path) 
     monkeypatch.setattr(
         "sovereignflow.bootstrap.application.PostgreSQLGraphTraversal",
         GraphTraversal,
+    )
+    monkeypatch.setattr(
+        "sovereignflow.bootstrap.application.PostgreSQLAccessPolicyRepository",
+        AccessPolicies,
+    )
+    monkeypatch.setattr(
+        "sovereignflow.bootstrap.application.PostgreSQLSecurityDecisionAudit",
+        SecurityDecisionAudit,
     )
     monkeypatch.setattr(
         "sovereignflow.bootstrap.application.WeaviateCollectionMigrator",

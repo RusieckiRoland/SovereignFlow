@@ -45,7 +45,7 @@ def execution_config(tmp_path: Path, queries: Path) -> ExecutionConfig:
         output_path=tmp_path / "results.jsonl",
         endpoint="http://localhost:8000/v1/query",
         timeout_seconds=2,
-        diagnostic_key="secret",
+        access_token="access-token",
     )
 
 
@@ -60,7 +60,14 @@ def test_execute_queries_normalizes_success_response(tmp_path: Path) -> None:
     queries = tmp_path / "queries.jsonl"
     write_queries(
         queries,
-        [{"query_id": "q1", "query": "Find orders", "domain": "Orders", "filters": {}}],
+        [
+            {
+                "query_id": "q1",
+                "query": "Find orders",
+                "capability_id": "orders-query",
+                "filters": {},
+            }
+        ],
     )
     seen = {}
     ticks = iter((1.0, 1.025))
@@ -87,7 +94,7 @@ def test_execute_queries_normalizes_success_response(tmp_path: Path) -> None:
                             "rank": 1,
                         }
                     ],
-                    "pipeline_trace": [{"step": "retrieve"}],
+                    "pipeline_trace": ["retrieve"],
                     "retrieval_trace": {
                         "seed_nodes": [
                             {
@@ -129,12 +136,14 @@ def test_execute_queries_normalizes_success_response(tmp_path: Path) -> None:
     assert result["usage"]["total_tokens"] == 12.0
     assert seen["payload"] == {
         "query": "Find orders",
-        "domain": "Orders",
+        "capability_id": "orders-query",
         "session_id": "q1",
         "filters": {},
     }
     assert seen["timeout"] == 2
-    assert seen["headers"]["X-sovereignflow-diagnostic-key"] == "secret"
+    assert seen["headers"]["Authorization"] == "Bearer access-token"
+    assert seen["headers"]["X-sovereignflow-diagnostics"] == "true"
+    assert result["pipeline_trace"] == [{"step_id": "retrieve"}]
 
 
 @pytest.mark.parametrize(
@@ -153,7 +162,10 @@ def test_execute_queries_records_controlled_request_errors(
     status: int | None,
 ) -> None:
     queries = tmp_path / "queries.jsonl"
-    write_queries(queries, [{"query_id": "q1", "query": "Query", "domain": "Domain"}])
+    write_queries(
+        queries,
+        [{"query_id": "q1", "query": "Query", "capability_id": "domain-query"}],
+    )
     ticks = iter((1.0, 1.1))
 
     def open_url(*args, **kwargs):
@@ -226,7 +238,10 @@ def test_execute_queries_records_controlled_request_errors(
 )
 def test_invalid_api_response_is_recorded(tmp_path: Path, payload: bytes) -> None:
     queries = tmp_path / "queries.jsonl"
-    write_queries(queries, [{"query_id": "q1", "query": "Query", "domain": "Domain"}])
+    write_queries(
+        queries,
+        [{"query_id": "q1", "query": "Query", "capability_id": "domain-query"}],
+    )
 
     execute_queries(
         execution_config(tmp_path, queries),
@@ -239,13 +254,18 @@ def test_invalid_api_response_is_recorded(tmp_path: Path, payload: bytes) -> Non
 
 def test_execute_queries_validates_config_input_and_output(tmp_path: Path) -> None:
     queries = tmp_path / "queries.jsonl"
-    write_queries(queries, [{"query_id": "q1", "query": "Query", "domain": "Domain"}])
+    write_queries(
+        queries,
+        [{"query_id": "q1", "query": "Query", "capability_id": "domain-query"}],
+    )
     config = execution_config(tmp_path, queries)
 
     with pytest.raises(ContractError, match="timeout_seconds"):
         execute_queries(ExecutionConfig(**{**config.__dict__, "timeout_seconds": 0}))
     with pytest.raises(ContractError, match="endpoint"):
         execute_queries(ExecutionConfig(**{**config.__dict__, "endpoint": "ftp://invalid"}))
+    with pytest.raises(ContractError, match="access_token"):
+        execute_queries(ExecutionConfig(**{**config.__dict__, "access_token": ""}))
 
     execute_queries(
         config,
@@ -282,12 +302,25 @@ def test_execute_queries_validates_config_input_and_output(tmp_path: Path) -> No
 @pytest.mark.parametrize(
     ("records", "message"),
     [
-        ([{"query_id": "q1", "query": "", "domain": "Domain"}], "query"),
-        ([{"query_id": "q1", "query": "Query", "domain": "Domain", "filters": []}], "filters"),
+        (
+            [{"query_id": "q1", "query": "", "capability_id": "domain-query"}],
+            "query",
+        ),
         (
             [
-                {"query_id": "q1", "query": "Query", "domain": "Domain"},
-                {"query_id": "q1", "query": "Query", "domain": "Domain"},
+                {
+                    "query_id": "q1",
+                    "query": "Query",
+                    "capability_id": "domain-query",
+                    "filters": [],
+                }
+            ],
+            "filters",
+        ),
+        (
+            [
+                {"query_id": "q1", "query": "Query", "capability_id": "domain-query"},
+                {"query_id": "q1", "query": "Query", "capability_id": "domain-query"},
             ],
             "Duplicate",
         ),
@@ -342,13 +375,17 @@ def test_execute_queries_against_http_server(tmp_path: Path) -> None:
     thread = threading.Thread(target=server.serve_forever)
     thread.start()
     queries = tmp_path / "queries.jsonl"
-    write_queries(queries, [{"query_id": "q1", "query": "Query", "domain": "Domain"}])
+    write_queries(
+        queries,
+        [{"query_id": "q1", "query": "Query", "capability_id": "domain-query"}],
+    )
     try:
         config = ExecutionConfig(
             queries_path=queries,
             output_path=tmp_path / "results.jsonl",
             endpoint=f"http://127.0.0.1:{server.server_port}/v1/query",
             timeout_seconds=2,
+            access_token="access-token",
         )
         assert execute_queries(config) == 1
     finally:

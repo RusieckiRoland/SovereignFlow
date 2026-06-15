@@ -192,26 +192,20 @@ The evaluator is a separate module inside this independent project. It communica
 Execute generated queries:
 
 ```bash
+export SOVEREIGNFLOW_ACCESS_TOKEN="..."
+
 python -m dataset_generator.evaluation run \
   --queries ./generated/queries.jsonl \
   --results ./evaluation/results.jsonl \
   --endpoint http://localhost:8000/v1/query \
+  --access-token-env SOVEREIGNFLOW_ACCESS_TOKEN \
   --timeout 30
 ```
 
-An optional diagnostic key can be read from an environment variable:
-
-```bash
-export SOVEREIGNFLOW_DIAGNOSTIC_KEY="..."
-
-python -m dataset_generator.evaluation run \
-  --queries ./generated/queries.jsonl \
-  --results ./evaluation/results.jsonl \
-  --endpoint http://localhost:8000/v1/query \
-  --diagnostic-key-env SOVEREIGNFLOW_DIAGNOSTIC_KEY
-```
-
-The key is sent as `X-SovereignFlow-Diagnostic-Key`. A production deployment must protect diagnostic retrieval traces with authentication and authorization.
+The evaluator sends the token as a standard Bearer credential and requests the
+protected diagnostic contract. Every generated query includes a `capability_id`;
+the evaluator never selects a domain or pipeline directly. The authenticated user
+must have both capability access and diagnostic permission.
 
 ## Diagnostic response contract
 

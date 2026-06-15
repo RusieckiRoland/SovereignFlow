@@ -24,6 +24,7 @@ _COLLECTION_PROPERTIES = {
     "text": ("text", "word"),
     "metadata_json": ("text", "word"),
     "acl_labels": ("text[]", "field"),
+    "acl_public": ("bool", None),
     "classification_level": ("int", None),
 }
 
@@ -58,6 +59,7 @@ class WeaviateCollectionMigrator:
                     "text": DataType.TEXT,
                     "text[]": DataType.TEXT_ARRAY,
                     "int": DataType.INT,
+                    "bool": DataType.BOOL,
                 }
                 self._client.collections.create(
                     name=collection_name,
@@ -141,6 +143,7 @@ class WeaviateVectorIndex:
                         sort_keys=True,
                     ),
                     "acl_labels": list(chunk.acl_labels),
+                    "acl_public": not chunk.acl_labels,
                     "classification_level": chunk.classification_level,
                 }
                 collection.data.insert(
@@ -272,6 +275,12 @@ class WeaviateRetrievalAdapter:
             query_filter = query_filter & Filter.by_property("classification_level").less_or_equal(
                 request.max_classification_level
             )
+        acl_filter = Filter.by_property("acl_public").equal(True)
+        if request.allowed_acl_labels:
+            acl_filter = acl_filter | Filter.by_property("acl_labels").contains_any(
+                list(request.allowed_acl_labels)
+            )
+        query_filter = query_filter & acl_filter
         for key, value in request.filters.items():
             query_filter = query_filter & Filter.by_property(str(key)).equal(value)
         return query_filter
@@ -319,6 +328,8 @@ def _data_type_name(value: Any) -> str:
         "text_array": "text[]",
         "int": "int",
         "integer": "int",
+        "boolean": "bool",
+        "bool": "bool",
     }
     return aliases.get(normalized, normalized)
 

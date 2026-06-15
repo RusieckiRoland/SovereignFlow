@@ -5,6 +5,7 @@ from .config import (
     ServerSettings,
     SovereignFlowSettings,
     WeaviateSettings,
+    WebClientSettings,
     load_settings,
 )
 from .import_application import BootstrappedImportApplication, bootstrap_import
@@ -16,6 +17,7 @@ __all__ = [
     "ModelSettings",
     "ServerSettings",
     "SovereignFlowSettings",
+    "WebClientSettings",
     "WeaviateSettings",
     "bootstrap",
     "bootstrap_import",

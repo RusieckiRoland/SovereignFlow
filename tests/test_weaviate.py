@@ -254,6 +254,7 @@ def test_weaviate_filter_supports_no_classification_limit() -> None:
             request(SearchMode.BM25),
             max_classification_level=None,
             filters={},
+            allowed_acl_labels=(),
         )
     )
 
@@ -364,7 +365,7 @@ def test_collection_migrator_creates_and_verifies_exact_schema() -> None:
     collections = IndexCollections(collection, exists=False)
     WeaviateCollectionMigrator(SimpleNamespace(collections=collections)).ensure("General")
     assert collections.created[0]["name"] == "General"
-    assert len(collections.created[0]["properties"]) == 10
+    assert len(collections.created[0]["properties"]) == 11
 
     properties = [
         SimpleNamespace(name=name, data_type=[data_type], tokenization=tokenization)
@@ -378,6 +379,7 @@ def test_collection_migrator_creates_and_verifies_exact_schema() -> None:
             "text": ("text", "word"),
             "metadata_json": ("text", "word"),
             "acl_labels": ("text_array", "field"),
+            "acl_public": ("boolean", None),
             "classification_level": ("integer", None),
         }.items()
     ]
@@ -436,6 +438,8 @@ def test_vector_index_replaces_a_source_as_one_idempotent_set() -> None:
     assert len(data.replaced) == 0
     assert len(data.inserted) == 2
     assert data.inserted[0]["properties"]["source_version"] == "v2"
+    assert data.inserted[0]["properties"]["acl_public"] is False
+    assert data.inserted[1]["properties"]["acl_public"] is True
     assert len(data.delete_filters) == 1
 
 
