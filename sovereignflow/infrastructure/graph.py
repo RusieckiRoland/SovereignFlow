@@ -7,11 +7,13 @@ from typing import Any
 from sovereignflow.domain import (
     DependencyUnavailableError,
     DocumentChunk,
+    DocumentSecurity,
     GraphDirection,
     GraphNodeRef,
     GraphTraversalRequest,
     IngestionError,
     SearchHit,
+    SecurityModelKind,
 )
 
 from .postgres_support import psycopg_module
@@ -104,7 +106,7 @@ class PostgreSQLGraphTraversal:
                                         "graph_path": list(path),
                                     },
                                     acl_labels=chunk.acl_labels,
-                                    classification_level=chunk.classification_level,
+                                    security=chunk.security,
                                 ),
                                 score=score / (depth + 1),
                                 score_type="graph",
@@ -211,11 +213,12 @@ class PostgreSQLGraphTraversal:
         request: GraphTraversalRequest,
         nodes: Iterable[GraphNodeRef],
     ) -> dict[GraphNodeRef, DocumentChunk]:
+        security_clause, security_params = _security_filter(request)
         cursor.execute(
             """
             SELECT chunk.source_id, chunk.chunk_id, chunk.source_uri,
                    chunk.text_content, chunk.metadata_json, chunk.acl_labels,
-                   chunk.classification_level
+                   chunk.clearance_label, chunk.classification_labels
             FROM ingestion.sources source
             JOIN ingestion.chunks chunk
               ON chunk.tenant_id = source.tenant_id
@@ -229,7 +232,9 @@ class PostgreSQLGraphTraversal:
                   cardinality(chunk.acl_labels) = 0
                   OR chunk.acl_labels && %s::text[]
               )
-              AND (%s::integer IS NULL OR chunk.classification_level <= %s)
+              AND """
+            + security_clause
+            + """
             ORDER BY chunk.source_id, chunk.chunk_id
             """,
             (
@@ -237,8 +242,7 @@ class PostgreSQLGraphTraversal:
                 request.domain,
                 [_node_key(node) for node in nodes],
                 list(request.allowed_acl_labels),
-                request.max_classification_level,
-                request.max_classification_level,
+                *security_params,
             ),
         )
         result = {}
@@ -253,13 +257,38 @@ class PostgreSQLGraphTraversal:
                 text=str(row[3]),
                 metadata=_metadata(row[4]),
                 acl_labels=tuple(row[5] or ()),
-                classification_level=int(row[6]),
+                security=DocumentSecurity(
+                    clearance_label=row[6],
+                    classification_labels=tuple(row[7] or ()),
+                ),
             )
         return result
 
 
 def _node_key(node: GraphNodeRef) -> str:
     return f"{node.source_id}{_NODE_SEPARATOR}{node.chunk_id}"
+
+
+def _security_filter(request: GraphTraversalRequest) -> tuple[str, tuple[object, ...]]:
+    model = request.security_model
+    if model.kind == SecurityModelKind.NONE:
+        return "TRUE", ()
+    if model.kind == SecurityModelKind.CLEARANCE_LEVEL:
+        if model.clearance_level is None or request.subject_security.clearance_label is None:
+            return "FALSE", ()
+        labels = model.clearance_level.allowed_document_labels(
+            request.subject_security.clearance_label
+        )
+        return "chunk.clearance_label = ANY(%s::text[])", (list(labels),)
+    if model.kind == SecurityModelKind.CLASSIFICATION_LABELS:
+        if model.classification_labels is None:
+            return "FALSE", ()
+        subject_labels = model.classification_labels.validate_labels(
+            request.subject_security.classification_labels,
+            "GraphTraversalRequest.subject_security.classification_labels",
+        )
+        return "chunk.classification_labels <@ %s::text[]", (list(subject_labels),)
+    return "FALSE", ()
 
 
 def _select_proposal(

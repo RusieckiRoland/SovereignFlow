@@ -11,8 +11,8 @@ from sovereignflow.domain import (
     QueryResult,
 )
 
-from .pipeline import PipelineContext, PipelineEngine
-from .ports import GraphTraversalPort, ModelGatewayPort, PromptRepositoryPort, RetrievalPort
+from .pipeline import ModelServerRuntime, PipelineContext, PipelineEngine
+from .ports import GraphTraversalPort, PromptRepositoryPort, RetrievalPort
 
 
 class RagQueryService:
@@ -22,19 +22,17 @@ class RagQueryService:
         domain: DomainProfile,
         retrieval: RetrievalPort,
         graph: GraphTraversalPort,
-        model: ModelGatewayPort,
+        model_servers: dict[str, ModelServerRuntime],
         prompts: PromptRepositoryPort,
         pipeline: PipelineDefinition,
         engine: PipelineEngine,
     ) -> None:
-        if model.scope == "external" and not domain.allow_external_model:
-            raise PolicyViolationError(
-                f"Domain '{domain.name}' does not allow external model transmission"
-            )
+        if not model_servers:
+            raise PolicyViolationError("At least one model server must be configured")
         self._domain = domain
         self._retrieval = retrieval
         self._graph = graph
-        self._model = model
+        self._model_servers = dict(model_servers)
         self._prompts = prompts
         self._pipeline = pipeline
         self._engine = engine
@@ -55,12 +53,9 @@ class RagQueryService:
                 "Query contains filters that are not allowed by the domain profile: "
                 + ", ".join(sorted(forbidden_filters))
             )
-        if self._model.scope == "external" and not authorization.allow_external_model:
-            raise PolicyViolationError(
-                "The authenticated user cannot transmit context to an external model"
-            )
         if command.diagnostics_requested and not authorization.diagnostic_access:
             raise PolicyViolationError("The authenticated user cannot access query diagnostics")
+        initial_model = next(iter(self._model_servers.values())).gateway
 
         return self._engine.execute(
             self._pipeline,
@@ -69,7 +64,8 @@ class RagQueryService:
                 domain=self._domain,
                 retrieval=self._retrieval,
                 graph=self._graph,
-                model=self._model,
+                model=initial_model,
+                model_servers=self._model_servers,
                 prompts=self._prompts,
             ),
         )
@@ -84,17 +80,8 @@ def _effective_authorization(
     allowed_acl = tuple(
         sorted(set(authorization.acl_labels).intersection(domain.allowed_acl_labels))
     )
-    user_maximum = authorization.max_classification_level
-    domain_maximum = domain.max_classification_level
-    if user_maximum is None:
-        maximum = domain_maximum
-    elif domain_maximum is None:
-        maximum = user_maximum
-    else:
-        maximum = min(user_maximum, domain_maximum)
     return replace(
         authorization,
         acl_labels=allowed_acl,
-        max_classification_level=maximum,
         allow_external_model=(authorization.allow_external_model and domain.allow_external_model),
     )

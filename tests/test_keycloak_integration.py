@@ -20,6 +20,7 @@ from sovereignflow.domain import (
     CapabilityDescriptor,
     ClaimGroupMapping,
     DocumentChunk,
+    DocumentSecurity,
     GroupCapabilityGrant,
     IngestionCommand,
 )
@@ -157,8 +158,14 @@ def test_real_keycloak_token_authorizes_full_neutral_rag_flow(
                 "pipeline_name": "default",
                 "allow_external_model": True,
                 "disclaimer": "",
-                "allowed_acl_labels": ["public", "internal", "restricted"],
-                "max_classification_level": 3,
+                "security": {
+                    "acl": {
+                        "enabled": True,
+                        "allowed_labels": ["public", "internal", "restricted"],
+                    },
+                    "require_travel_permission": True,
+                    "security_model": {"kind": "none"},
+                },
                 "retrieval": {
                     "mode": "hybrid",
                     "top_k": 5,
@@ -203,20 +210,21 @@ def test_real_keycloak_token_authorizes_full_neutral_rag_flow(
                     "roles_claim": "roles",
                     "groups_claim": "groups",
                     "acl_claim": "acl_labels",
-                    "classification_claim": "max_classification_level",
+                    "clearance_claim": "clearance_label",
+                    "classification_labels_claim": "classification_labels",
                     "external_model_claim": "allow_external_model",
                     "diagnostic_claim": "sovereignflow_diagnostics",
                 },
-                "selected_model": "controlled-external",
-                "models": [
+                "model_servers": [
                     {
-                        "name": "controlled-external",
-                        "scope": "external",
+                        "id": "default-model",
+                        "trust_boundary": "external",
                         "base_url": f"{provider_url}/v1",
                         "model": "controlled-model",
                         "timeout_seconds": 2,
                         "input_cost_per_million": 0,
                         "output_cost_per_million": 0,
+                        "security_profile": {"kind": "none"},
                     }
                 ],
                 "embeddings": {
@@ -257,7 +265,7 @@ def test_real_keycloak_token_authorizes_full_neutral_rag_flow(
                         source_id="permitted-source",
                         text="The permitted record is stored in the primary table.",
                         acl_labels=("internal",),
-                        classification_level=2,
+                        security=DocumentSecurity(clearance_label="INTERNAL"),
                     ),
                 ),
             )

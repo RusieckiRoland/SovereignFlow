@@ -12,8 +12,13 @@ allowed_pipeline_names:
 allow_external_model: false
 disclaimer: |
   This response is generated from retrieved source material and should be verified by the user.
-allowed_acl_labels: []
-max_classification_level: 0
+security:
+  acl:
+    enabled: true
+    allowed_labels: []
+  require_travel_permission: true
+  security_model:
+    kind: none
 retrieval:
   mode: hybrid
   top_k: 8

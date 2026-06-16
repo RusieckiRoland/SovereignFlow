@@ -10,6 +10,7 @@ from sovereignflow.domain import (
     DatasetImportStatus,
     DependencyUnavailableError,
     DocumentChunk,
+    DocumentSecurity,
     GraphNodeRef,
     GraphRelationship,
     IngestionCommand,
@@ -38,7 +39,7 @@ def command(*, relationships=()) -> IngestionCommand:
                 text="content",
                 metadata={"page": 1},
                 acl_labels=("public",),
-                classification_level=1,
+                security=DocumentSecurity(clearance_label="PUBLIC"),
             ),
         ),
         relationships=relationships,
@@ -69,7 +70,8 @@ def chunk_rows():
             "content",
             '{"page":1}',
             ["public"],
-            1,
+            "PUBLIC",
+            [],
         )
     ]
 

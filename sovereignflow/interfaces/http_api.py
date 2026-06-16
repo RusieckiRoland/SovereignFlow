@@ -193,7 +193,9 @@ def create_app(
         forbidden_security_fields = {
             "tenant_id",
             "acl_labels",
-            "max_classification_level",
+            "security",
+            "clearance_label",
+            "classification_labels",
             "roles",
             "groups",
             "allow_external_model",
@@ -441,7 +443,7 @@ def _serialize_diagnostics(diagnostics) -> dict[str, Any]:
         "subject_hash": diagnostics.subject_hash,
         "tenant_id": diagnostics.tenant_id,
         "allowed_acl_labels": list(diagnostics.allowed_acl_labels),
-        "max_classification_level": diagnostics.max_classification_level,
+        "security_model_kind": diagnostics.security_model_kind.value,
         "search_mode": diagnostics.search_mode.value,
         "retrieval": [
             {
@@ -461,11 +463,43 @@ def _serialize_diagnostics(diagnostics) -> dict[str, Any]:
         "context_characters": diagnostics.context_characters,
         "provider": diagnostics.provider,
         "model": diagnostics.model,
+        "prompt_key": diagnostics.prompt_key,
+        "model_transmission": {
+            "checked": diagnostics.model_transmission.checked,
+            "allowed": diagnostics.model_transmission.allowed,
+            "reason_code": diagnostics.model_transmission.reason_code,
+            "selected_model_server_id": (diagnostics.model_transmission.selected_model_server_id),
+            "final_model_server_id": diagnostics.model_transmission.final_model_server_id,
+            "rerouted": diagnostics.model_transmission.rerouted,
+            "trust_boundary": (
+                diagnostics.model_transmission.trust_boundary.value
+                if diagnostics.model_transmission.trust_boundary is not None
+                else None
+            ),
+            "external_transmission": (
+                diagnostics.model_transmission.external_transmission.value
+                if diagnostics.model_transmission.external_transmission is not None
+                else None
+            ),
+            "context_security_requirement": _serialize_context_security_requirement(
+                diagnostics.model_transmission.context_security_requirement
+            ),
+            "checked_chunk_ids": list(diagnostics.model_transmission.checked_chunk_ids),
+            "blocked_chunk_ids": list(diagnostics.model_transmission.blocked_chunk_ids),
+        },
         "system_prompt_hash": diagnostics.system_prompt_hash,
         "prompt_tokens": diagnostics.prompt_tokens,
         "completion_tokens": diagnostics.completion_tokens,
         "model_duration_ms": diagnostics.model_duration_ms,
         "pipeline_trace": list(diagnostics.pipeline_trace),
+    }
+
+
+def _serialize_context_security_requirement(requirement) -> dict[str, Any]:
+    return {
+        "security_model_kind": requirement.security_model_kind.value,
+        "clearance_label": requirement.clearance_label,
+        "classification_labels": list(requirement.classification_labels),
     }
 
 

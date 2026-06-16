@@ -21,7 +21,8 @@ identity_provider:
   roles_claim: roles
   groups_claim: groups
   acl_claim: acl_labels
-  classification_claim: max_classification_level
+  clearance_claim: clearance_label
+  classification_labels_claim: classification_labels
   external_model_claim: allow_external_model
   diagnostic_claim: sovereignflow_diagnostics
 
@@ -31,24 +32,26 @@ web_client:
   token_url: http://127.0.0.1:28090/realms/sovereignflow/protocol/openid-connect/token
   logout_url: http://127.0.0.1:28090/realms/sovereignflow/protocol/openid-connect/logout
 
-selected_model: local-default
-models:
-  - name: local-default
-    scope: local
+model_servers:
+  - id: default-model
+    trust_boundary: internal
     base_url: http://127.0.0.1:8080/v1
     model: your-local-model
     timeout_seconds: 120
     input_cost_per_million: 0
     output_cost_per_million: 0
-  # - name: openai
-  #   scope: external
+    security_profile:
+      kind: none
+  # - id: external-openai
+  #   trust_boundary: external
   #   base_url: https://api.openai.com/v1
   #   model: your-openai-model
   #   api_key_env: OPENAI_API_KEY
   #   timeout_seconds: 120
   #   input_cost_per_million: 0
   #   output_cost_per_million: 0
-
+  #   security_profile:
+  #     kind: none
 embeddings:
   name: local-embeddings
   base_url: http://127.0.0.1:8082/v1

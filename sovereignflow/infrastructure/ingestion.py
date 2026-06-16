@@ -12,6 +12,7 @@ from sovereignflow.domain import (
     DatasetImportStatus,
     DependencyUnavailableError,
     DocumentChunk,
+    DocumentSecurity,
     GraphNodeRef,
     GraphRelationship,
     IngestionCommand,
@@ -114,11 +115,12 @@ class PostgreSQLIngestionRepository:
                                 INSERT INTO ingestion.chunks (
                                     tenant_id, domain, source_id, source_version,
                                     chunk_id, position, source_uri, text_content,
-                                    metadata_json, acl_labels, classification_level
+                                    metadata_json, acl_labels, clearance_label,
+                                    classification_labels
                                 )
                                 VALUES (
                                     %s, %s, %s, %s, %s, %s, %s, %s,
-                                    %s::jsonb, %s, %s
+                                    %s::jsonb, %s, %s, %s
                                 )
                                 """,
                                 (
@@ -132,7 +134,8 @@ class PostgreSQLIngestionRepository:
                                     chunk.text,
                                     _json(chunk.metadata),
                                     list(chunk.acl_labels),
-                                    chunk.classification_level,
+                                    chunk.security.clearance_label,
+                                    list(chunk.security.classification_labels),
                                 ),
                             )
                         for relationship in command.relationships:
@@ -624,7 +627,7 @@ class PostgreSQLIngestionRepository:
         cursor.execute(
             """
             SELECT chunk_id, source_uri, text_content, metadata_json,
-                   acl_labels, classification_level
+                   acl_labels, clearance_label, classification_labels
             FROM ingestion.chunks
             WHERE tenant_id = %s AND domain = %s
               AND source_id = %s AND source_version = %s
@@ -642,7 +645,10 @@ class PostgreSQLIngestionRepository:
                 text=str(chunk[2]),
                 metadata=_mapping(chunk[3]),
                 acl_labels=tuple(chunk[4] or ()),
-                classification_level=int(chunk[5]),
+                security=DocumentSecurity(
+                    clearance_label=chunk[5],
+                    classification_labels=tuple(chunk[6] or ()),
+                ),
             )
             for chunk in cursor.fetchall()
         )

@@ -17,6 +17,7 @@ from sovereignflow.application import (
     RagQueryService,
     default_action_registry,
 )
+from sovereignflow.application.pipeline import ModelServerRuntime
 from sovereignflow.domain import DependencyUnavailableError
 from sovereignflow.infrastructure import (
     EmbeddingEndpoint,
@@ -77,7 +78,8 @@ def bootstrap(settings: SovereignFlowSettings) -> BootstrappedApplication:
             roles_claim=identity.roles_claim,
             groups_claim=identity.groups_claim,
             acl_claim=identity.acl_claim,
-            classification_claim=identity.classification_claim,
+            clearance_claim=identity.clearance_claim,
+            classification_labels_claim=identity.classification_labels_claim,
             external_model_claim=identity.external_model_claim,
             diagnostic_claim=identity.diagnostic_claim,
         )
@@ -91,19 +93,24 @@ def bootstrap(settings: SovereignFlowSettings) -> BootstrappedApplication:
             timeout_seconds=settings.embeddings.timeout_seconds,
         )
     )
-    selected = settings.selected_model
-    model = OpenAIModelGateway(
-        ModelEndpoint(
-            name=selected.name,
-            scope=selected.scope,
-            base_url=selected.base_url,
-            model=selected.model,
-            api_key=selected.api_key,
-            timeout_seconds=selected.timeout_seconds,
-            input_cost_per_million=selected.input_cost_per_million,
-            output_cost_per_million=selected.output_cost_per_million,
+    model_servers = {
+        server.server_id: ModelServerRuntime(
+            definition=server.definition,
+            gateway=OpenAIModelGateway(
+                ModelEndpoint(
+                    name=server.server_id,
+                    scope=server.trust_boundary.value,
+                    base_url=server.base_url,
+                    model=server.model,
+                    api_key=server.api_key,
+                    timeout_seconds=server.timeout_seconds,
+                    input_cost_per_million=server.input_cost_per_million,
+                    output_cost_per_million=server.output_cost_per_million,
+                )
+            ),
         )
-    )
+        for server in settings.model_servers
+    }
     prompts = FilePromptRepository(settings.prompts_root)
     pipelines = YamlPipelineRepository(settings.pipelines_root)
     PostgreSQLMigrationRunner(
@@ -144,7 +151,6 @@ def bootstrap(settings: SovereignFlowSettings) -> BootstrappedApplication:
                 embeddings=embeddings,
             )
             retrieval.healthcheck()
-            prompts.load(domain.prompt_name)
             for pipeline_name in domain.allowed_pipeline_names:
                 pipeline = pipelines.load(pipeline_name)
                 validator.validate(pipeline)
@@ -152,7 +158,7 @@ def bootstrap(settings: SovereignFlowSettings) -> BootstrappedApplication:
                     domain=domain,
                     retrieval=retrieval,
                     graph=graph,
-                    model=model,
+                    model_servers=model_servers,
                     prompts=prompts,
                     pipeline=pipeline,
                     engine=engine,
@@ -180,7 +186,10 @@ def bootstrap(settings: SovereignFlowSettings) -> BootstrappedApplication:
             access_policies,
             WeaviateHealthProbe(client),
             _GatewayHealthProbe(name="embeddings", gateway=embeddings),
-            _GatewayHealthProbe(name="model", gateway=model),
+            *(
+                _GatewayHealthProbe(name=f"model:{server_id}", gateway=runtime.gateway)
+                for server_id, runtime in model_servers.items()
+            ),
             *retrieval_probes,
         )
         for probe in probes:

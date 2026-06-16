@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
-from typing import Protocol
+from collections.abc import Iterable, Mapping, Sequence
+from typing import Any, Protocol
 
 from sovereignflow.domain import (
     AccessPolicyBundle,
@@ -94,7 +94,13 @@ class ModelGatewayPort(Protocol):
     @property
     def scope(self) -> str: ...
 
-    def generate(self, *, system_prompt: str, user_prompt: str) -> ModelGeneration: ...
+    def generate(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        generation_parameters: Mapping[str, Any] | None = None,
+    ) -> ModelGeneration: ...
 
     def healthcheck(self) -> None: ...
 

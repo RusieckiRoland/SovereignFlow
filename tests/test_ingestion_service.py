@@ -6,8 +6,10 @@ import pytest
 
 from sovereignflow.application.ingestion import DocumentIngestionService, _payload_hash
 from sovereignflow.domain import (
+    ClearanceLevelModel,
     DependencyUnavailableError,
     DocumentChunk,
+    DocumentSecurity,
     DomainProfile,
     GraphDirection,
     GraphNodeRef,
@@ -20,6 +22,8 @@ from sovereignflow.domain import (
     PolicyViolationError,
     RetrievalProfile,
     SearchMode,
+    SecurityModel,
+    SecurityModelKind,
     ValidationError,
 )
 
@@ -35,7 +39,10 @@ def profile() -> DomainProfile:
         retrieval=RetrievalProfile(SearchMode.HYBRID, 5, 1000),
         graph=GraphTraversalProfile(False, 1, 1, GraphDirection.BOTH),
         allowed_acl_labels=("public", "staff"),
-        max_classification_level=2,
+        security_model=SecurityModel(
+            kind=SecurityModelKind.CLEARANCE_LEVEL,
+            clearance_level=ClearanceLevelModel({"PUBLIC": 0, "INTERNAL": 10}),
+        ),
     )
 
 
@@ -44,7 +51,7 @@ def command(
     domain: str = "general",
     tenant_id: str = "tenant-a",
     acl_labels: tuple[str, ...] = ("public",),
-    classification_level: int = 1,
+    clearance_label: str = "PUBLIC",
 ) -> IngestionCommand:
     return IngestionCommand(
         idempotency_key="import-1",
@@ -64,7 +71,7 @@ def command(
                 text="second",
                 metadata={"page": 2},
                 acl_labels=acl_labels,
-                classification_level=classification_level,
+                security=DocumentSecurity(clearance_label=clearance_label),
             ),
             DocumentChunk(
                 chunk_id="chunk-1",
@@ -75,7 +82,7 @@ def command(
                 text="first",
                 metadata={"page": 1},
                 acl_labels=acl_labels,
-                classification_level=classification_level,
+                security=DocumentSecurity(clearance_label=clearance_label),
             ),
         ),
     )
@@ -173,10 +180,10 @@ def test_failed_job_can_be_retried_explicitly() -> None:
         command(domain="other"),
         command(tenant_id="tenant-b"),
         command(acl_labels=("forbidden",)),
-        command(classification_level=3),
+        command(clearance_label="SECRET"),
     ],
 )
-def test_ingestion_enforces_domain_tenant_acl_and_classification(invalid_command) -> None:
+def test_ingestion_enforces_domain_tenant_acl_and_security(invalid_command) -> None:
     repository = Repository()
 
     with pytest.raises(PolicyViolationError):

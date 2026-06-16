@@ -7,11 +7,14 @@ import pytest
 from sovereignflow.domain import (
     DependencyUnavailableError,
     DocumentChunk,
+    DocumentSecurity,
     GraphDirection,
     GraphNodeRef,
     GraphTraversalRequest,
     IngestionError,
     SearchHit,
+    SecurityModel,
+    SubjectSecurity,
 )
 from sovereignflow.infrastructure import PostgreSQLGraphTraversal
 from sovereignflow.infrastructure import graph as graph_module
@@ -26,7 +29,7 @@ def hit(source_id: str = "source-1", chunk_id: str = "chunk-1", score: float = 0
             source_id=source_id,
             text="seed",
             acl_labels=("public",),
-            classification_level=1,
+            security=DocumentSecurity(clearance_label="PUBLIC"),
         ),
         score,
         "hybrid",
@@ -48,7 +51,8 @@ def request(
         direction=direction,
         relationship_types=("references",),
         allowed_acl_labels=("public",),
-        max_classification_level=1,
+        security_model=SecurityModel.none(),
+        subject_security=SubjectSecurity(),
     )
 
 
@@ -60,7 +64,8 @@ def chunk_row(source_id: str, chunk_id: str, text: str = "related"):
         text,
         '{"kind":"graph"}',
         ["public"],
-        1,
+        None,
+        [],
     )
 
 
@@ -223,7 +228,8 @@ def test_graph_traversal_selects_strongest_deterministic_parent(monkeypatch) -> 
         direction=GraphDirection.OUTGOING,
         relationship_types=(),
         allowed_acl_labels=("public",),
-        max_classification_level=None,
+        security_model=SecurityModel.none(),
+        subject_security=SubjectSecurity(),
     )
     cursor = Cursor(
         all_rows=[

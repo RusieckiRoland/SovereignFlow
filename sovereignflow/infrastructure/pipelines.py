@@ -80,10 +80,9 @@ class YamlPipelineRepository:
     def _parse_step(raw: Any) -> PipelineStepDefinition:
         if not isinstance(raw, dict):
             raise PipelineDefinitionError("Each pipeline step must be a mapping")
-        allowed = {"id", "action", "action_version", "next", "routes", "end"}
-        if not set(raw).issubset(allowed):
-            unknown = ", ".join(sorted(set(raw) - allowed))
-            raise PipelineDefinitionError(f"Unknown pipeline step fields: {unknown}")
+        if not all(isinstance(key, str) for key in raw):
+            raise PipelineDefinitionError("Pipeline step field names must be strings")
+        reserved = {"id", "action", "action_version", "next", "routes", "end"}
         required = {"id", "action", "action_version"}
         if not required.issubset(raw):
             missing = ", ".join(sorted(required - set(raw)))
@@ -110,6 +109,7 @@ class YamlPipelineRepository:
                 next_step_id=next_step,
                 routes=routes,
                 terminal=terminal,
+                config={key: value for key, value in raw.items() if key not in reserved},
             )
         except ValidationError as exc:
             raise PipelineDefinitionError(str(exc)) from exc

@@ -7,11 +7,13 @@ from sovereignflow.application.ports import EmbeddingGatewayPort
 from sovereignflow.domain import (
     DependencyUnavailableError,
     DocumentChunk,
+    DocumentSecurity,
     IngestionJob,
     ProviderProtocolError,
     SearchHit,
     SearchMode,
     SearchRequest,
+    SecurityModelKind,
 )
 
 _COLLECTION_PROPERTIES = {
@@ -25,7 +27,8 @@ _COLLECTION_PROPERTIES = {
     "metadata_json": ("text", "word"),
     "acl_labels": ("text[]", "field"),
     "acl_public": ("bool", None),
-    "classification_level": ("int", None),
+    "clearance_label": ("text", "field"),
+    "classification_labels": ("text[]", "field"),
 }
 
 
@@ -144,7 +147,8 @@ class WeaviateVectorIndex:
                     ),
                     "acl_labels": list(chunk.acl_labels),
                     "acl_public": not chunk.acl_labels,
-                    "classification_level": chunk.classification_level,
+                    "clearance_label": chunk.security.clearance_label,
+                    "classification_labels": list(chunk.security.classification_labels),
                 }
                 collection.data.insert(
                     uuid=object_uuid,
@@ -271,10 +275,7 @@ class WeaviateRetrievalAdapter:
             raise DependencyUnavailableError("weaviate-client is not installed") from exc
         query_filter = Filter.by_property("domain").equal(request.domain)
         query_filter = query_filter & Filter.by_property("tenant_id").equal(request.tenant_id)
-        if request.max_classification_level is not None:
-            query_filter = query_filter & Filter.by_property("classification_level").less_or_equal(
-                request.max_classification_level
-            )
+        query_filter = query_filter & _security_filter(Filter, request)
         acl_filter = Filter.by_property("acl_public").equal(True)
         if request.allowed_acl_labels:
             acl_filter = acl_filter | Filter.by_property("acl_labels").contains_any(
@@ -302,7 +303,10 @@ class WeaviateRetrievalAdapter:
                 text=str(properties["text"]),
                 metadata=metadata,
                 acl_labels=tuple(properties.get("acl_labels") or ()),
-                classification_level=int(properties.get("classification_level") or 0),
+                security=DocumentSecurity(
+                    clearance_label=properties.get("clearance_label"),
+                    classification_labels=tuple(properties.get("classification_labels") or ()),
+                ),
             )
             if mode == SearchMode.SEMANTIC:
                 distance = float(item.metadata.distance)
@@ -314,6 +318,35 @@ class WeaviateRetrievalAdapter:
         except (KeyError, TypeError, ValueError, AttributeError, json.JSONDecodeError) as exc:
             raise ProviderProtocolError("Weaviate returned an invalid object") from exc
         return SearchHit(chunk=chunk, score=score, score_type=score_type)
+
+
+def _security_filter(filter_factory: Any, request: SearchRequest) -> Any:
+    model = request.security_model
+    if model.kind == SecurityModelKind.NONE:
+        return filter_factory.by_property("domain").equal(request.domain)
+    if model.kind == SecurityModelKind.CLEARANCE_LEVEL:
+        if model.clearance_level is None or request.subject_security.clearance_label is None:
+            return filter_factory.by_property("domain").equal("__never__")
+        allowed_labels = model.clearance_level.allowed_document_labels(
+            request.subject_security.clearance_label
+        )
+        return filter_factory.by_property("clearance_label").contains_any(list(allowed_labels))
+    if model.kind == SecurityModelKind.CLASSIFICATION_LABELS:
+        if model.classification_labels is None:
+            return filter_factory.by_property("domain").equal("__never__")
+        subject_labels = model.classification_labels.validate_labels(
+            request.subject_security.classification_labels,
+            "SearchRequest.subject_security.classification_labels",
+        )
+        forbidden = tuple(
+            label
+            for label in model.classification_labels.labels_universe_subset
+            if label not in set(subject_labels)
+        )
+        if not forbidden:
+            return filter_factory.by_property("domain").equal(request.domain)
+        return ~filter_factory.by_property("classification_labels").contains_any(list(forbidden))
+    return filter_factory.by_property("domain").equal("__never__")
 
 
 def _data_type_name(value: Any) -> str:

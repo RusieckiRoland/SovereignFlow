@@ -17,7 +17,7 @@ from sovereignflow.bootstrap.config import (
     AdminSettings,
     EmbeddingSettings,
     IdentityProviderSettings,
-    ModelSettings,
+    ModelServerSettings,
     PostgreSQLSettings,
     ServerSettings,
     SovereignFlowSettings,
@@ -32,8 +32,12 @@ from sovereignflow.domain import (
     GraphDirection,
     GraphTraversalProfile,
     ModelGeneration,
+    ModelServerDefinition,
+    ModelServerSecurityProfile,
     RetrievalProfile,
     SearchMode,
+    SecurityModelKind,
+    TrustBoundary,
 )
 
 
@@ -160,15 +164,24 @@ def settings(tmp_path: Path) -> SovereignFlowSettings:
         postgresql=PostgreSQLSettings("postgresql://test", 5),
         weaviate=WeaviateSettings("localhost", 8080, 50051, False, "secret"),
         embeddings=EmbeddingSettings("embed", "http://embed/v1", "e", "", 5),
-        selected_model=ModelSettings(
-            "model",
-            "local",
-            "http://model/v1",
-            "m",
-            "",
-            5,
-            0.0,
-            0.0,
+        model_servers=(
+            ModelServerSettings(
+                "default-model",
+                TrustBoundary.INTERNAL,
+                "http://model/v1",
+                "m",
+                "",
+                5,
+                0.0,
+                0.0,
+                ModelServerDefinition(
+                    "default-model",
+                    TrustBoundary.INTERNAL,
+                    ModelServerSecurityProfile(
+                        SecurityModelKind.NONE,
+                    ),
+                ),
+            ),
         ),
         admin=AdminSettings("admin-secret"),
         identity_provider=IdentityProviderSettings(
@@ -182,7 +195,8 @@ def settings(tmp_path: Path) -> SovereignFlowSettings:
             roles_claim="roles",
             groups_claim="groups",
             acl_claim="acl_labels",
-            classification_claim="max_classification_level",
+            clearance_claim="clearance_label",
+            classification_labels_claim="classification_labels",
             external_model_claim="allow_external_model",
             diagnostic_claim="sovereignflow_diagnostics",
         ),

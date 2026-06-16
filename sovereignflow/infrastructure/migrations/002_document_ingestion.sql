@@ -23,7 +23,8 @@ CREATE TABLE IF NOT EXISTS ingestion.chunks (
     text_content TEXT NOT NULL,
     metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
     acl_labels TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
-    classification_level INTEGER NOT NULL DEFAULT 0,
+    clearance_label TEXT,
+    classification_labels TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
     PRIMARY KEY (tenant_id, domain, source_id, source_version, chunk_id),
     CONSTRAINT fk_ingestion_chunks_source_version
         FOREIGN KEY (tenant_id, domain, source_id, source_version)
@@ -32,7 +33,6 @@ CREATE TABLE IF NOT EXISTS ingestion.chunks (
         )
         ON DELETE CASCADE,
     CONSTRAINT ck_ingestion_chunks_position CHECK (position >= 0),
-    CONSTRAINT ck_ingestion_chunks_classification CHECK (classification_level >= 0),
     CONSTRAINT ck_ingestion_chunks_text CHECK (btrim(text_content) <> '')
 );
 

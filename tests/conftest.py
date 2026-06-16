@@ -10,18 +10,27 @@ from typing import Any
 import pytest
 
 from sovereignflow.application import PipelineEngine, RagQueryService, default_action_registry
+from sovereignflow.application.pipeline import ModelServerRuntime
 from sovereignflow.domain import (
     AuthorizationContext,
+    ClearanceLevelModel,
     DocumentChunk,
+    DocumentSecurity,
     DomainProfile,
     GraphDirection,
     GraphTraversalProfile,
     ModelGeneration,
+    ModelServerDefinition,
+    ModelServerSecurityProfile,
     PipelineDefinition,
     PipelineStepDefinition,
     RetrievalProfile,
     SearchHit,
     SearchMode,
+    SecurityModel,
+    SecurityModelKind,
+    SubjectSecurity,
+    TrustBoundary,
 )
 
 
@@ -146,7 +155,7 @@ def authorization_context(**overrides) -> AuthorizationContext:
         "roles": ("user",),
         "groups": ("group-a",),
         "acl_labels": ("public",),
-        "max_classification_level": 1,
+        "security": SubjectSecurity(clearance_label="PUBLIC"),
         "allow_external_model": False,
         "diagnostic_access": True,
     }
@@ -169,7 +178,8 @@ def default_pipeline() -> PipelineDefinition:
         "normalize_query",
         "retrieve",
         "expand_graph",
-        "build_context",
+        "manage_context_budget",
+        "enforce_model_transmission_policy",
         "call_model",
         "finalize",
     )
@@ -182,14 +192,58 @@ def default_pipeline() -> PipelineDefinition:
             PipelineStepDefinition(
                 step_id=action_id,
                 action=action_id,
-                action_version="1.0",
+                action_version=(
+                    "2.0" if action_id == "enforce_model_transmission_policy" else "1.0"
+                ),
                 next_step_id=action_ids[index + 1] if index + 1 < len(action_ids) else None,
                 terminal=index + 1 == len(action_ids),
+                config=_default_step_config(action_id),
             )
             for index, action_id in enumerate(action_ids)
         ),
         checksum="a" * 64,
     )
+
+
+def _default_step_config(action_id: str) -> dict:
+    configs = {
+        "retrieve": {
+            "query_source": "normalized_query",
+            "search_mode": "hybrid",
+            "top_k": 3,
+            "filters": {},
+        },
+        "expand_graph": {
+            "enabled": True,
+            "max_depth": 2,
+            "max_nodes": 10,
+            "direction": "both",
+            "relationship_types": ["references"],
+        },
+        "manage_context_budget": {
+            "source": "hits",
+            "target": "evidence",
+            "max_context_characters": 500,
+        },
+        "enforce_model_transmission_policy": {
+            "selected_model_server_id": "default-model",
+            "external_transmission": "allowed",
+        },
+        "call_model": {
+            "prompt_key": "answer",
+            "user_parts": {
+                "user_question": {
+                    "source": "normalized_query",
+                    "template": "USER QUESTION\n{}\n\n",
+                },
+                "evidence": {
+                    "source": "evidence",
+                    "template": "EVIDENCE\n{}\n\n",
+                },
+            },
+        },
+    }
+    return configs.get(action_id, {})
 
 
 def build_query_service(
@@ -200,15 +254,24 @@ def build_query_service(
     prompts,
     graph: StubGraph | None = None,
     audit: StubAudit | None = None,
+    pipeline: PipelineDefinition | None = None,
 ) -> RagQueryService:
     selected_audit = audit or StubAudit()
     return RagQueryService(
         domain=domain,
         retrieval=retrieval,
         graph=graph or StubGraph(),
-        model=model,
+        model_servers=model_servers(
+            default=model,
+            trust_boundary=(
+                TrustBoundary.EXTERNAL
+                if getattr(model, "scope", "") == "external"
+                else TrustBoundary.INTERNAL
+            ),
+            clearance_label="INTERNAL",
+        ),
         prompts=prompts,
-        pipeline=default_pipeline(),
+        pipeline=pipeline or default_pipeline(),
         engine=PipelineEngine(
             registry=default_action_registry(),
             audit=selected_audit,
@@ -216,6 +279,44 @@ def build_query_service(
             run_id_factory=lambda: "00000000-0000-0000-0000-000000000001",
         ),
     )
+
+
+def model_servers(
+    *,
+    default,
+    trust_boundary: TrustBoundary = TrustBoundary.INTERNAL,
+    clearance_label: str = "INTERNAL",
+    reroute_to: str | None = None,
+    reroute_model=None,
+    reroute_clearance_label: str = "INTERNAL",
+) -> dict[str, ModelServerRuntime]:
+    servers = {
+        "default-model": ModelServerRuntime(
+            definition=ModelServerDefinition(
+                server_id="default-model",
+                trust_boundary=trust_boundary,
+                security_profile=ModelServerSecurityProfile(
+                    SecurityModelKind.CLEARANCE_LEVEL,
+                    clearance_label=clearance_label,
+                ),
+                security_reroute_server_id=reroute_to,
+            ),
+            gateway=default,
+        )
+    }
+    if reroute_to is not None:
+        servers[reroute_to] = ModelServerRuntime(
+            definition=ModelServerDefinition(
+                server_id=reroute_to,
+                trust_boundary=TrustBoundary.INTERNAL,
+                security_profile=ModelServerSecurityProfile(
+                    SecurityModelKind.CLEARANCE_LEVEL,
+                    clearance_label=reroute_clearance_label,
+                ),
+            ),
+            gateway=reroute_model or default,
+        )
+    return servers
 
 
 @pytest.fixture
@@ -229,7 +330,10 @@ def domain_profile() -> DomainProfile:
         allow_external_model=False,
         disclaimer="Verify the result.",
         allowed_acl_labels=("public",),
-        max_classification_level=1,
+        security_model=SecurityModel(
+            kind=SecurityModelKind.CLEARANCE_LEVEL,
+            clearance_level=ClearanceLevelModel({"PUBLIC": 0, "INTERNAL": 10}),
+        ),
         retrieval=RetrievalProfile(
             mode=SearchMode.HYBRID,
             top_k=3,
@@ -259,7 +363,7 @@ def search_hit() -> SearchHit:
             text="Evidence text.",
             metadata={"kind": "example"},
             acl_labels=("public",),
-            classification_level=1,
+            security=DocumentSecurity(clearance_label="PUBLIC"),
         ),
         score=0.75,
         score_type="hybrid",

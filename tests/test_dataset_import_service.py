@@ -6,10 +6,12 @@ import pytest
 
 from sovereignflow.application import DatasetImportService
 from sovereignflow.domain import (
+    ClearanceLevelModel,
     DatasetImportRequest,
     DatasetImportRun,
     DatasetImportStatus,
     DocumentChunk,
+    DocumentSecurity,
     DomainProfile,
     GraphDirection,
     GraphNodeRef,
@@ -21,6 +23,8 @@ from sovereignflow.domain import (
     PolicyViolationError,
     RetrievalProfile,
     SearchMode,
+    SecurityModel,
+    SecurityModelKind,
 )
 
 
@@ -35,7 +39,10 @@ def profile() -> DomainProfile:
         retrieval=RetrievalProfile(SearchMode.HYBRID, 5, 1000),
         graph=GraphTraversalProfile(True, 2, 10, GraphDirection.BOTH),
         allowed_acl_labels=("public",),
-        max_classification_level=1,
+        security_model=SecurityModel(
+            SecurityModelKind.CLEARANCE_LEVEL,
+            clearance_level=ClearanceLevelModel({"PUBLIC": 0}),
+        ),
     )
 
 
@@ -55,7 +62,7 @@ def command(source_id: str, *, domain: str = "neutral") -> IngestionCommand:
                 source_id,
                 "text",
                 acl_labels=("public",),
-                classification_level=1,
+                security=DocumentSecurity(clearance_label="PUBLIC"),
             ),
         ),
     )

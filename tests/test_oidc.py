@@ -29,7 +29,8 @@ def settings(jwks_url: str = "https://identity.test/jwks") -> OidcSettings:
         roles_claim="roles",
         groups_claim="groups",
         acl_claim="acl_labels",
-        classification_claim="max_classification_level",
+        clearance_claim="clearance_label",
+        classification_labels_claim="classification_labels",
         external_model_claim="allow_external_model",
         diagnostic_claim="sovereignflow_diagnostics",
     )
@@ -54,7 +55,8 @@ def token(private, key_id: str, **overrides) -> str:
         "roles": ["reader"],
         "groups": ["customs"],
         "acl_labels": ["public", "internal"],
-        "max_classification_level": 2,
+        "clearance_label": "INTERNAL",
+        "classification_labels": ["US_NOFORN", "US_ORCON"],
         "allow_external_model": True,
         "sovereignflow_diagnostics": True,
     }
@@ -84,7 +86,8 @@ def test_oidc_authenticator_validates_and_maps_authorization_context() -> None:
     assert context.roles == ("reader",)
     assert context.groups == ("customs",)
     assert context.acl_labels == ("internal", "public")
-    assert context.max_classification_level == 2
+    assert context.security.clearance_label == "INTERNAL"
+    assert context.security.classification_labels == ("US_NOFORN", "US_ORCON")
     assert context.allow_external_model is True
     assert context.diagnostic_access is True
 
@@ -97,7 +100,8 @@ def test_oidc_authenticator_uses_safe_defaults_for_optional_claims() -> None:
         roles=[],
         groups=[],
         acl_labels=[],
-        max_classification_level=None,
+        clearance_label=None,
+        classification_labels=[],
         allow_external_model=False,
         sovereignflow_diagnostics=False,
     )
@@ -105,7 +109,8 @@ def test_oidc_authenticator_uses_safe_defaults_for_optional_claims() -> None:
     context = selected.authenticate(access_token)
 
     assert context.roles == ()
-    assert context.max_classification_level is None
+    assert context.security.clearance_label is None
+    assert context.security.classification_labels == ()
     assert context.allow_external_model is False
 
 
@@ -165,8 +170,8 @@ def test_oidc_authenticator_reads_explicit_nested_claim_paths() -> None:
         (lambda private: token(private, "key-1", tenant_id=""), "tenant_id"),
         (lambda private: token(private, "key-1", roles="reader"), "string array"),
         (
-            lambda private: token(private, "key-1", max_classification_level=True),
-            "non-negative integer",
+            lambda private: token(private, "key-1", clearance_label=True),
+            "clearance_label",
         ),
         (
             lambda private: token(private, "key-1", allow_external_model="yes"),

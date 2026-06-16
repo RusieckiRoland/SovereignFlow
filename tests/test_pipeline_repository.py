@@ -45,6 +45,30 @@ def test_pipeline_repository_loads_deterministic_definition(tmp_path: Path) -> N
     assert first.steps[0].terminal is True
 
 
+def test_pipeline_repository_preserves_action_specific_step_config(tmp_path: Path) -> None:
+    raw = valid_document()
+    raw["pipeline"]["steps"][0]["prompt_key"] = "general/answer"
+    raw["pipeline"]["steps"][0]["user_parts"] = {
+        "question": {
+            "source": "normalized_query",
+            "template": "### User\n{}\n",
+        }
+    }
+    write(tmp_path / "default.yaml", raw)
+
+    step = YamlPipelineRepository(tmp_path).load("default").steps[0]
+
+    assert dict(step.config) == {
+        "prompt_key": "general/answer",
+        "user_parts": {
+            "question": {
+                "source": "normalized_query",
+                "template": "### User\n{}\n",
+            }
+        },
+    }
+
+
 def test_pipeline_repository_rejects_path_escape_missing_and_invalid_yaml(tmp_path: Path) -> None:
     repository = YamlPipelineRepository(tmp_path)
     with pytest.raises(PipelineDefinitionError, match="escapes"):
@@ -71,7 +95,7 @@ def test_pipeline_repository_rejects_path_escape_missing_and_invalid_yaml(tmp_pa
         (lambda raw: raw["pipeline"].update(steps=[]), "cannot be empty"),
         (lambda raw: raw["pipeline"].update(name=1), "pipeline.name"),
         (lambda raw: raw["pipeline"].update(steps=["bad"]), "step must"),
-        (lambda raw: raw["pipeline"]["steps"][0].update(extra=True), "Unknown"),
+        (lambda raw: raw["pipeline"]["steps"][0].update({1: "bad"}), "field names"),
         (lambda raw: raw["pipeline"]["steps"][0].update(id=1), "steps\\[\\].id"),
         (
             lambda raw: (raw["pipeline"]["steps"][0].pop("action_version"), None)[1],

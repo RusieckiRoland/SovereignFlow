@@ -4,6 +4,7 @@ import hashlib
 import json
 
 from sovereignflow.domain import (
+    DocumentSecurity,
     DomainProfile,
     IngestionCommand,
     IngestionJob,
@@ -71,9 +72,10 @@ class DocumentIngestionService:
         for chunk in command.chunks:
             if chunk.acl_labels and not set(chunk.acl_labels).issubset(allowed_labels):
                 raise PolicyViolationError("Ingestion contains a forbidden ACL label")
-            maximum = self._domain.max_classification_level
-            if maximum is not None and chunk.classification_level > maximum:
-                raise PolicyViolationError("Ingestion contains a forbidden classification level")
+            _validate_document_security(
+                model=self._domain.security_model,
+                security=chunk.security,
+            )
 
     @staticmethod
     def _result(job: IngestionJob) -> IngestionResult:
@@ -104,7 +106,7 @@ def _payload_hash(command: IngestionCommand) -> str:
                 "source_uri": chunk.source_uri,
                 "metadata": dict(chunk.metadata),
                 "acl_labels": list(chunk.acl_labels),
-                "classification_level": chunk.classification_level,
+                "security": _security_payload(chunk.security),
             }
             for chunk in sorted(command.chunks, key=lambda item: item.chunk_id)
         ],
@@ -140,3 +142,47 @@ def _payload_hash(command: IngestionCommand) -> str:
     except (TypeError, ValueError) as exc:
         raise ValidationError("Ingestion metadata must be valid JSON") from exc
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _validate_document_security(*, model, security: DocumentSecurity) -> None:
+    kind = getattr(model.kind, "value", None)
+    if kind == "none":
+        if security.clearance_label is not None or security.classification_labels:
+            raise PolicyViolationError("Ingestion contains security metadata for disabled model")
+        return
+    if kind == "clearance_level":
+        if model.clearance_level is None or security.clearance_label is None:
+            raise PolicyViolationError("Ingestion contains incomplete clearance metadata")
+        try:
+            model.clearance_level.value(
+                security.clearance_label,
+                "chunk.security.clearance_label",
+            )
+        except ValidationError as exc:
+            raise PolicyViolationError("Ingestion contains a forbidden clearance label") from exc
+        if security.classification_labels:
+            raise PolicyViolationError("Ingestion mixed security model metadata")
+        return
+    if kind == "classification_labels":
+        if model.classification_labels is None:
+            raise PolicyViolationError("Ingestion contains incomplete classification label model")
+        try:
+            model.classification_labels.validate_labels(
+                security.classification_labels,
+                "chunk.security.classification_labels",
+            )
+        except ValidationError as exc:
+            raise PolicyViolationError(
+                "Ingestion contains a forbidden classification label"
+            ) from exc
+        if security.clearance_label is not None:
+            raise PolicyViolationError("Ingestion mixed security model metadata")
+        return
+    raise ValidationError("Unsupported security model")
+
+
+def _security_payload(security: DocumentSecurity) -> dict[str, object]:
+    return {
+        "clearance_label": security.clearance_label,
+        "classification_labels": list(security.classification_labels),
+    }

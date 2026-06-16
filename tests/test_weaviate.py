@@ -9,12 +9,15 @@ import pytest
 from sovereignflow.domain import (
     DependencyUnavailableError,
     DocumentChunk,
+    DocumentSecurity,
     IngestionCommand,
     IngestionJob,
     IngestionJobStatus,
     ProviderProtocolError,
     SearchMode,
     SearchRequest,
+    SecurityModel,
+    SubjectSecurity,
 )
 from sovereignflow.infrastructure.weaviate import (
     WeaviateCollectionMigrator,
@@ -105,7 +108,8 @@ def item(mode: SearchMode, *, properties=None):
             "text": "evidence",
             "metadata_json": '{"kind":"example"}',
             "acl_labels": ["public"],
-            "classification_level": 1,
+            "clearance_label": "PUBLIC",
+            "classification_labels": [],
         }
         if properties is None
         else properties
@@ -125,7 +129,8 @@ def request(mode: SearchMode) -> SearchRequest:
         mode=mode,
         filters={"status": "active"},
         allowed_acl_labels=("public",),
-        max_classification_level=1,
+        security_model=SecurityModel.none(),
+        subject_security=SubjectSecurity(),
     )
 
 
@@ -252,7 +257,6 @@ def test_weaviate_filter_supports_no_classification_limit() -> None:
     hits = adapter.search(
         replace(
             request(SearchMode.BM25),
-            max_classification_level=None,
             filters={},
             allowed_acl_labels=(),
         )
@@ -294,7 +298,7 @@ def ingestion_job() -> IngestionJob:
                 text="first",
                 metadata={"page": 1},
                 acl_labels=("public",),
-                classification_level=1,
+                security=DocumentSecurity(clearance_label="PUBLIC"),
             ),
             DocumentChunk(
                 chunk_id="chunk-2",
@@ -365,7 +369,7 @@ def test_collection_migrator_creates_and_verifies_exact_schema() -> None:
     collections = IndexCollections(collection, exists=False)
     WeaviateCollectionMigrator(SimpleNamespace(collections=collections)).ensure("General")
     assert collections.created[0]["name"] == "General"
-    assert len(collections.created[0]["properties"]) == 11
+    assert len(collections.created[0]["properties"]) == 12
 
     properties = [
         SimpleNamespace(name=name, data_type=[data_type], tokenization=tokenization)
@@ -380,7 +384,8 @@ def test_collection_migrator_creates_and_verifies_exact_schema() -> None:
             "metadata_json": ("text", "word"),
             "acl_labels": ("text_array", "field"),
             "acl_public": ("boolean", None),
-            "classification_level": ("integer", None),
+            "clearance_label": ("text", "field"),
+            "classification_labels": ("text_array", "field"),
         }.items()
     ]
     configured = SimpleNamespace(

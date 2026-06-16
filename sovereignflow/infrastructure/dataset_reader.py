@@ -12,6 +12,7 @@ from typing import Any
 from sovereignflow.domain import (
     DatasetImportRequest,
     DocumentChunk,
+    DocumentSecurity,
     GraphNodeRef,
     GraphRelationship,
     IngestionCommand,
@@ -208,7 +209,7 @@ class JsonlDatasetReader:
                     INSERT INTO nodes (
                         chunk_id, source_id, source_version, domain, tenant_id,
                         source_uri, text_content, metadata_json, acl_json,
-                        classification_level, position
+                        security_json, position
                     )
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
@@ -222,7 +223,7 @@ class JsonlDatasetReader:
                         chunk.text,
                         _json(chunk.metadata),
                         _json(list(chunk.acl_labels)),
-                        chunk.classification_level,
+                        _json(_security_payload(chunk.security)),
                         count,
                     ),
                 )
@@ -353,7 +354,7 @@ class JsonlDatasetReader:
         chunk_rows = connection.execute(
             """
             SELECT chunk_id, source_uri, text_content, metadata_json,
-                   acl_json, classification_level
+                   acl_json, security_json
             FROM nodes
             WHERE source_id = ? AND source_version = ?
             ORDER BY position
@@ -370,7 +371,7 @@ class JsonlDatasetReader:
                 text=str(row[2]),
                 metadata=_object(row[3], "node metadata"),
                 acl_labels=tuple(_array(row[4], "node ACL")),
-                classification_level=int(row[5]),
+                security=_security_from_json(row[5]),
             )
             for row in chunk_rows
         )
@@ -436,7 +437,7 @@ def _create_workspace(connection: sqlite3.Connection) -> None:
             text_content TEXT NOT NULL,
             metadata_json TEXT NOT NULL,
             acl_json TEXT NOT NULL,
-            classification_level INTEGER NOT NULL,
+            security_json TEXT NOT NULL,
             position INTEGER NOT NULL,
             FOREIGN KEY (source_id, source_version)
                 REFERENCES source_versions (source_id, source_version)
@@ -515,13 +516,11 @@ def _jsonl(path: Path) -> Iterator[tuple[dict[str, Any], bytes]]:
 def _chunk(record: dict[str, Any], path: Path) -> DocumentChunk:
     metadata = record.get("metadata", {})
     acl_labels = record.get("acl_labels", [])
-    classification = record.get("classification_level", 0)
+    security = _security_from_record(record, path)
     if not isinstance(metadata, dict):
         raise ValidationError(f"{path}: node metadata must be a JSON object")
     if not isinstance(acl_labels, list) or any(not isinstance(item, str) for item in acl_labels):
         raise ValidationError(f"{path}: node ACL must be a list of strings")
-    if not isinstance(classification, int) or isinstance(classification, bool):
-        raise ValidationError(f"{path}: classification_level must be an integer")
     source_uri = record.get("source_uri")
     if source_uri is not None and not isinstance(source_uri, str):
         raise ValidationError(f"{path}: source_uri must be a string or null")
@@ -534,7 +533,7 @@ def _chunk(record: dict[str, Any], path: Path) -> DocumentChunk:
         text=_string(record, "text", path),
         metadata=metadata,
         acl_labels=tuple(acl_labels),
-        classification_level=classification,
+        security=security,
     )
 
 
@@ -550,6 +549,41 @@ def _required(value: str, field: str) -> str:
     if not normalized:
         raise ValidationError(f"{field} is required")
     return normalized
+
+
+def _security_from_record(record: dict[str, Any], path: Path) -> DocumentSecurity:
+    security = record.get("security", {})
+    if not isinstance(security, dict):
+        raise ValidationError(f"{path}: node security must be a JSON object")
+    clearance_label = security.get("clearance_label")
+    classification_labels = security.get("classification_labels", [])
+    if clearance_label is not None and not isinstance(clearance_label, str):
+        raise ValidationError(f"{path}: security.clearance_label must be a string or null")
+    if not isinstance(classification_labels, list) or any(
+        not isinstance(item, str) for item in classification_labels
+    ):
+        raise ValidationError(f"{path}: security.classification_labels must be a list of strings")
+    return DocumentSecurity(
+        clearance_label=clearance_label,
+        classification_labels=tuple(classification_labels),
+    )
+
+
+def _security_from_json(value: str) -> DocumentSecurity:
+    decoded = _object(value, "node security")
+    return DocumentSecurity(
+        clearance_label=decoded.get("clearance_label"),
+        classification_labels=tuple(
+            _array(_json(decoded.get("classification_labels", [])), "node security labels")
+        ),
+    )
+
+
+def _security_payload(security: DocumentSecurity) -> dict[str, object]:
+    return {
+        "clearance_label": security.clearance_label,
+        "classification_labels": list(security.classification_labels),
+    }
 
 
 def _json(value: Any) -> str:

@@ -2,7 +2,7 @@ pipeline:
   name: strict-evidence-rag
   entry_step: normalize_query
   behavior_version: "1.0"
-  max_steps: 7
+  max_steps: 8
   steps:
     - id: normalize_query
       action: normalize_query
@@ -12,26 +12,54 @@ pipeline:
     - id: retrieve
       action: retrieve
       action_version: "1.0"
+      query_source: normalized_query
+      search_mode: semantic
+      top_k: 3
+      filters: {}
       next: expand_graph
 
     - id: expand_graph
       action: expand_graph
       action_version: "1.0"
-      next: build_context
+      enabled: true
+      max_depth: 2
+      max_nodes: 10
+      direction: both
+      relationship_types:
+        - references
+      next: manage_context_budget
 
-    - id: build_context
-      action: build_context
+    - id: manage_context_budget
+      action: manage_context_budget
       action_version: "1.0"
+      source: hits
+      target: evidence
+      max_context_characters: 500
       next: require_evidence
 
     - id: require_evidence
       action: require_evidence
       action_version: "1.0"
+      next: enforce_model_transmission_policy
+
+    - id: enforce_model_transmission_policy
+      action: enforce_model_transmission_policy
+      action_version: "2.0"
+      selected_model_server_id: default-model
+      external_transmission: allowed
       next: call_model
 
     - id: call_model
       action: call_model
       action_version: "1.0"
+      prompt_key: answer
+      user_parts:
+        user_question:
+          source: normalized_query
+          template: "USER QUESTION\n{}\n\n"
+        evidence:
+          source: evidence
+          template: "EVIDENCE\n{}\n\n"
       next: finalize
 
     - id: finalize

@@ -28,8 +28,14 @@ def valid_files(tmp_path: Path) -> tuple[Path, dict]:
                 "allowed_pipeline_names": ["direct", "graph", "strict"],
                 "allow_external_model": False,
                 "disclaimer": "Verify.",
-                "allowed_acl_labels": ["public"],
-                "max_classification_level": 1,
+                "security": {
+                    "acl": {"enabled": True, "allowed_labels": ["public"]},
+                    "require_travel_permission": True,
+                    "security_model": {
+                        "kind": "clearance_level",
+                        "clearance_level": {"levels": {"PUBLIC": 0, "INTERNAL": 10}},
+                    },
+                },
                 "retrieval": {
                     "mode": "hybrid",
                     "top_k": 3,
@@ -54,16 +60,19 @@ def valid_files(tmp_path: Path) -> tuple[Path, dict]:
             "connection_url_env": "TEST_POSTGRES_URL",
             "timeout_seconds": 5,
         },
-        "selected_model": "local",
-        "models": [
+        "model_servers": [
             {
-                "name": "local",
-                "scope": "local",
+                "id": "default-model",
+                "trust_boundary": "internal",
                 "base_url": "http://localhost:8080/v1",
                 "model": "chat",
                 "timeout_seconds": 30,
                 "input_cost_per_million": 1.5,
                 "output_cost_per_million": 6.0,
+                "security_profile": {
+                    "kind": "clearance_level",
+                    "clearance_label": "INTERNAL",
+                },
             }
         ],
         "admin": {"api_key_env": "TEST_ADMIN_KEY"},
@@ -78,7 +87,8 @@ def valid_files(tmp_path: Path) -> tuple[Path, dict]:
             "roles_claim": "roles",
             "groups_claim": "groups",
             "acl_claim": "acl_labels",
-            "classification_claim": "max_classification_level",
+            "clearance_claim": "clearance_label",
+            "classification_labels_claim": "classification_labels",
             "external_model_claim": "allow_external_model",
             "diagnostic_claim": "sovereignflow_diagnostics",
         },
@@ -119,7 +129,7 @@ def write(path: Path, raw) -> None:
 
 def test_load_settings_resolves_complete_configuration(tmp_path: Path) -> None:
     path, raw = valid_files(tmp_path)
-    raw["models"][0]["api_key_env"] = "TEST_MODEL_KEY"
+    raw["model_servers"][0]["api_key_env"] = "TEST_MODEL_KEY"
     raw["embeddings"]["api_key_env"] = "TEST_EMBED_KEY"
     raw["web_client"] = {
         "client_id": "web-client",
@@ -134,13 +144,13 @@ def test_load_settings_resolves_complete_configuration(tmp_path: Path) -> None:
     assert settings.server.threads == 4
     assert settings.postgresql.connection_url == "postgresql://test"
     assert settings.weaviate.api_key == "weaviate-secret"
-    assert settings.selected_model.api_key == "model-secret"
+    assert settings.model_servers[0].api_key == "model-secret"
     assert settings.embeddings.api_key == "embed-secret"
     assert settings.admin.api_key == "admin-secret"
     assert settings.identity_provider.audience == "sovereignflow"
     assert settings.web_client is not None
     assert settings.web_client.client_id == "web-client"
-    assert settings.selected_model.input_cost_per_million == 1.5
+    assert settings.model_servers[0].input_cost_per_million == 1.5
     assert settings.domains[0].retrieval.mode == SearchMode.HYBRID
     assert settings.domains[0].graph.max_depth == 2
     assert settings.domains[0].allowed_pipeline_names == (
@@ -150,6 +160,28 @@ def test_load_settings_resolves_complete_configuration(tmp_path: Path) -> None:
         "strict",
     )
     assert settings.prompts_root == tmp_path / "prompts"
+
+
+def test_load_settings_accepts_none_and_label_model_server_profiles(tmp_path: Path) -> None:
+    path, raw = valid_files(tmp_path)
+    raw["model_servers"][0]["security_profile"] = {"kind": "none"}
+    write(path, raw)
+    settings = load_settings(path)
+    assert settings.model_servers[0].definition.security_profile.security_model_kind.value == "none"
+
+    second = tmp_path / "labels"
+    second.mkdir()
+    path, raw = valid_files(second)
+    raw["model_servers"][0]["security_profile"] = {
+        "kind": "classification_labels",
+        "classification_labels": ["US_NOFORN", "US_ORCON"],
+    }
+    write(path, raw)
+    settings = load_settings(path)
+    assert settings.model_servers[0].definition.security_profile.classification_labels == (
+        "US_NOFORN",
+        "US_ORCON",
+    )
 
 
 @pytest.mark.parametrize(
@@ -222,23 +254,44 @@ def test_web_client_configuration_is_optional_and_strict(tmp_path: Path) -> None
 @pytest.mark.parametrize(
     ("mutate", "message"),
     [
-        (lambda raw: raw.update(models=[]), "models must"),
-        (lambda raw: raw.update(models=["bad"]), "Each model"),
+        (lambda raw: raw.update(model_servers=[]), "model_servers must"),
+        (lambda raw: raw.update(model_servers=["bad"]), "Each model server"),
         (
-            lambda raw: raw.update(models=[raw["models"][0], raw["models"][0]]),
+            lambda raw: raw.update(
+                model_servers=[raw["model_servers"][0], raw["model_servers"][0]]
+            ),
             "unique",
         ),
-        (lambda raw: raw.update(selected_model="missing"), "does not exist"),
         (
-            lambda raw: raw["models"][0].update(scope="invalid"),
-            "scope",
+            lambda raw: raw["model_servers"][0].update(trust_boundary="invalid"),
+            "trust_boundary",
         ),
         (
-            lambda raw: raw["models"][0].update(input_cost_per_million=-1),
+            lambda raw: raw["model_servers"][0].update(security_profile={"kind": "bad"}),
+            "security_profile.kind",
+        ),
+        (
+            lambda raw: raw["model_servers"][0].update(
+                security_profile={"kind": "clearance_level"}
+            ),
+            "security_profile.clearance_label",
+        ),
+        (
+            lambda raw: raw["model_servers"][0].update(
+                security_profile={"kind": "classification_labels"}
+            ),
+            "security_profile.classification_labels",
+        ),
+        (
+            lambda raw: raw["model_servers"][0].update(security_reroute_server_id="missing"),
+            "security_reroute_server_id",
+        ),
+        (
+            lambda raw: raw["model_servers"][0].update(input_cost_per_million=-1),
             "input_cost_per_million",
         ),
         (
-            lambda raw: raw["models"][0].update(input_cost_per_million="invalid"),
+            lambda raw: raw["model_servers"][0].update(input_cost_per_million="invalid"),
             "input_cost_per_million",
         ),
         (lambda raw: raw.update(domains=[]), "domains must"),
@@ -280,12 +333,14 @@ def test_load_settings_rejects_invalid_root_configuration(
         load_settings(path)
 
 
-def test_external_model_must_be_allowed_by_every_domain(tmp_path: Path) -> None:
-    path, raw = valid_files(tmp_path)
-    raw["models"][0]["scope"] = "external"
-    write(path, raw)
+def test_legacy_domain_classification_level_is_rejected(tmp_path: Path) -> None:
+    path, _ = valid_files(tmp_path)
+    domain_path = tmp_path / "domain.yaml"
+    domain = yaml.safe_load(domain_path.read_text(encoding="utf-8"))
+    domain["max_classification_level"] = 1
+    write(domain_path, domain)
 
-    with pytest.raises(ConfigurationError, match="forbidden"):
+    with pytest.raises(ConfigurationError, match="max_classification_level"):
         load_settings(path)
 
 
@@ -312,8 +367,8 @@ def test_duplicate_domain_names_are_rejected(tmp_path: Path) -> None:
             "retrieval.filters",
         ),
         (
-            lambda raw: raw.update(allowed_acl_labels="public"),
-            "allowed_acl_labels",
+            lambda raw: raw["security"]["acl"].update(allowed_labels="public"),
+            "security.acl.allowed_labels",
         ),
         (
             lambda raw: raw.update(allow_external_model="false"),

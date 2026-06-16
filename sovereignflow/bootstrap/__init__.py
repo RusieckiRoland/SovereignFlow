@@ -1,7 +1,7 @@
 from .application import BootstrappedApplication, bootstrap
 from .config import (
     EmbeddingSettings,
-    ModelSettings,
+    ModelServerSettings,
     ServerSettings,
     SovereignFlowSettings,
     WeaviateSettings,
@@ -14,7 +14,7 @@ __all__ = [
     "BootstrappedApplication",
     "BootstrappedImportApplication",
     "EmbeddingSettings",
-    "ModelSettings",
+    "ModelServerSettings",
     "ServerSettings",
     "SovereignFlowSettings",
     "WebClientSettings",

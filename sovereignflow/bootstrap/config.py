@@ -8,12 +8,18 @@ from typing import Any
 import yaml
 
 from sovereignflow.domain import (
+    ClassificationLabelsModel,
+    ClearanceLevelModel,
     ConfigurationError,
     DomainProfile,
     GraphDirection,
     GraphTraversalProfile,
+    ModelServerDefinition,
+    ModelServerSecurityProfile,
     RetrievalProfile,
     SearchMode,
+    SecurityModelKind,
+    TrustBoundary,
 )
 
 
@@ -49,15 +55,16 @@ class EmbeddingSettings:
 
 
 @dataclass(frozen=True)
-class ModelSettings:
-    name: str
-    scope: str
+class ModelServerSettings:
+    server_id: str
+    trust_boundary: TrustBoundary
     base_url: str
     model: str
     api_key: str
     timeout_seconds: float
     input_cost_per_million: float
     output_cost_per_million: float
+    definition: ModelServerDefinition
 
 
 @dataclass(frozen=True)
@@ -77,7 +84,8 @@ class IdentityProviderSettings:
     roles_claim: str
     groups_claim: str
     acl_claim: str
-    classification_claim: str
+    clearance_claim: str
+    classification_labels_claim: str
     external_model_claim: str
     diagnostic_claim: str
 
@@ -97,7 +105,7 @@ class SovereignFlowSettings:
     postgresql: PostgreSQLSettings
     weaviate: WeaviateSettings
     embeddings: EmbeddingSettings
-    selected_model: ModelSettings
+    model_servers: tuple[ModelServerSettings, ...]
     admin: AdminSettings
     identity_provider: IdentityProviderSettings
     prompts_root: Path
@@ -119,16 +127,11 @@ def load_settings(path: str | Path) -> SovereignFlowSettings:
     if web_client is not None and not isinstance(web_client, dict):
         raise ConfigurationError("web_client must be a mapping")
 
-    models_raw = raw.get("models")
-    if not isinstance(models_raw, list) or not models_raw:
-        raise ConfigurationError("models must be a non-empty list")
-    model_items = tuple(_model_settings(item) for item in models_raw)
-    if len({item.name for item in model_items}) != len(model_items):
-        raise ConfigurationError("model names must be unique")
-    selected_name = _required(raw.get("selected_model"), "selected_model")
-    selected = next((item for item in model_items if item.name == selected_name), None)
-    if selected is None:
-        raise ConfigurationError(f"selected_model does not exist: {selected_name}")
+    model_servers_raw = raw.get("model_servers")
+    if not isinstance(model_servers_raw, list) or not model_servers_raw:
+        raise ConfigurationError("model_servers must be a non-empty list")
+    model_servers = tuple(_model_server_settings(item) for item in model_servers_raw)
+    _validate_model_servers(model_servers)
 
     prompt_root = _resolve_existing_directory(
         config_path.parent,
@@ -155,16 +158,6 @@ def load_settings(path: str | Path) -> SovereignFlowSettings:
     )
     if len({domain.name for domain in domains}) != len(domains):
         raise ConfigurationError("domain names must be unique")
-    forbidden_domains = [
-        domain.name
-        for domain in domains
-        if selected.scope == "external" and not domain.allow_external_model
-    ]
-    if forbidden_domains:
-        raise ConfigurationError(
-            "Selected external model is forbidden for domains: "
-            + ", ".join(sorted(forbidden_domains))
-        )
 
     return SovereignFlowSettings(
         config_path=config_path,
@@ -197,7 +190,7 @@ def load_settings(path: str | Path) -> SovereignFlowSettings:
                 "embeddings.timeout_seconds",
             ),
         ),
-        selected_model=selected,
+        model_servers=model_servers,
         admin=AdminSettings(api_key=_secret(admin.get("api_key_env"))),
         identity_provider=_identity_provider_settings(identity_provider),
         web_client=(_web_client_settings(web_client) if isinstance(web_client, dict) else None),
@@ -207,31 +200,85 @@ def load_settings(path: str | Path) -> SovereignFlowSettings:
     )
 
 
-def _model_settings(raw: Any) -> ModelSettings:
+def _model_server_settings(raw: Any) -> ModelServerSettings:
     if not isinstance(raw, dict):
-        raise ConfigurationError("Each model must be a mapping")
-    scope = _required(raw.get("scope"), "models[].scope").lower()
-    if scope not in {"local", "external"}:
-        raise ConfigurationError("models[].scope must be 'local' or 'external'")
-    return ModelSettings(
-        name=_required(raw.get("name"), "models[].name"),
-        scope=scope,
-        base_url=_required(raw.get("base_url"), "models[].base_url"),
-        model=_required(raw.get("model"), "models[].model"),
+        raise ConfigurationError("Each model server must be a mapping")
+    try:
+        trust_boundary = TrustBoundary(
+            _required(raw.get("trust_boundary"), "model_servers[].trust_boundary").lower()
+        )
+    except ValueError as exc:
+        raise ConfigurationError(
+            "model_servers[].trust_boundary must be internal or external"
+        ) from exc
+    server_id = _required(raw.get("id"), "model_servers[].id")
+    security_profile = _model_server_security_profile(_mapping(raw, "security_profile"))
+    definition = ModelServerDefinition(
+        server_id=server_id,
+        trust_boundary=trust_boundary,
+        security_profile=security_profile,
+        security_reroute_server_id=(
+            _required(raw.get("security_reroute_server_id"), "security_reroute_server_id")
+            if raw.get("security_reroute_server_id") is not None
+            else None
+        ),
+    )
+    return ModelServerSettings(
+        server_id=server_id,
+        trust_boundary=trust_boundary,
+        base_url=_required(raw.get("base_url"), "model_servers[].base_url"),
+        model=_required(raw.get("model"), "model_servers[].model"),
         api_key=_optional_secret(raw.get("api_key_env")),
         timeout_seconds=_positive_float(
             raw.get("timeout_seconds"),
-            "models[].timeout_seconds",
+            "model_servers[].timeout_seconds",
         ),
         input_cost_per_million=_non_negative_float(
             raw.get("input_cost_per_million"),
-            "models[].input_cost_per_million",
+            "model_servers[].input_cost_per_million",
         ),
         output_cost_per_million=_non_negative_float(
             raw.get("output_cost_per_million"),
-            "models[].output_cost_per_million",
+            "model_servers[].output_cost_per_million",
         ),
+        definition=definition,
     )
+
+
+def _model_server_security_profile(raw: dict[str, Any]) -> ModelServerSecurityProfile:
+    try:
+        kind = SecurityModelKind(_required(raw.get("kind"), "security_profile.kind").lower())
+    except ValueError as exc:
+        raise ConfigurationError(
+            "security_profile.kind must be none, clearance_level or classification_labels"
+        ) from exc
+    if kind == SecurityModelKind.NONE:
+        return ModelServerSecurityProfile(kind)
+    if kind == SecurityModelKind.CLEARANCE_LEVEL:
+        return ModelServerSecurityProfile(
+            kind,
+            clearance_label=_required(
+                raw.get("clearance_label"),
+                "security_profile.clearance_label",
+            ),
+        )
+    labels = raw.get("classification_labels")
+    if not isinstance(labels, list):
+        raise ConfigurationError("security_profile.classification_labels must be a list")
+    return ModelServerSecurityProfile(
+        kind,
+        classification_labels=tuple(str(label) for label in labels),
+    )
+
+
+def _validate_model_servers(model_servers: tuple[ModelServerSettings, ...]) -> None:
+    server_ids = {server.server_id for server in model_servers}
+    if len(server_ids) != len(model_servers):
+        raise ConfigurationError("model server ids must be unique")
+    for server in model_servers:
+        reroute_id = server.definition.security_reroute_server_id
+        if reroute_id is not None and reroute_id not in server_ids:
+            raise ConfigurationError(f"security_reroute_server_id does not exist: {reroute_id}")
 
 
 def _identity_provider_settings(raw: dict[str, Any]) -> IdentityProviderSettings:
@@ -260,9 +307,13 @@ def _identity_provider_settings(raw: dict[str, Any]) -> IdentityProviderSettings
         roles_claim=_required(raw.get("roles_claim"), "identity_provider.roles_claim"),
         groups_claim=_required(raw.get("groups_claim"), "identity_provider.groups_claim"),
         acl_claim=_required(raw.get("acl_claim"), "identity_provider.acl_claim"),
-        classification_claim=_required(
-            raw.get("classification_claim"),
-            "identity_provider.classification_claim",
+        clearance_claim=_required(
+            raw.get("clearance_claim"),
+            "identity_provider.clearance_claim",
+        ),
+        classification_labels_claim=_required(
+            raw.get("classification_labels_claim"),
+            "identity_provider.classification_labels_claim",
         ),
         external_model_claim=_required(
             raw.get("external_model_claim"),
@@ -291,6 +342,7 @@ def _load_domain(path: Path) -> DomainProfile:
     raw = _read_yaml(path)
     retrieval = _mapping(raw, "retrieval")
     graph = _mapping(raw, "graph")
+    security = _mapping(raw, "security")
     try:
         mode = SearchMode(_required(retrieval.get("mode"), "retrieval.mode").lower())
     except ValueError as exc:
@@ -301,10 +353,12 @@ def _load_domain(path: Path) -> DomainProfile:
     allowed_filter_fields = retrieval.get("allowed_filter_fields")
     if not isinstance(allowed_filter_fields, list):
         raise ConfigurationError("retrieval.allowed_filter_fields must be a list")
-    labels = raw.get("allowed_acl_labels")
+    if "max_classification_level" in raw:
+        raise ConfigurationError("max_classification_level is no longer supported")
+    acl = _mapping(security, "acl")
+    labels = acl.get("allowed_labels")
     if not isinstance(labels, list):
-        raise ConfigurationError("allowed_acl_labels must be a list")
-    maximum = raw.get("max_classification_level")
+        raise ConfigurationError("security.acl.allowed_labels must be a list")
     allowed_pipeline_names = raw.get("allowed_pipeline_names", [])
     if not isinstance(allowed_pipeline_names, list):
         raise ConfigurationError("allowed_pipeline_names must be a list")
@@ -331,7 +385,11 @@ def _load_domain(path: Path) -> DomainProfile:
         ),
         disclaimer=str(raw.get("disclaimer") or "").strip(),
         allowed_acl_labels=tuple(str(label) for label in labels),
-        max_classification_level=(int(maximum) if maximum is not None else None),
+        security_model=_security_model(_mapping(security, "security_model")),
+        require_travel_permission=_required_bool(
+            security.get("require_travel_permission"),
+            "security.require_travel_permission",
+        ),
         retrieval=RetrievalProfile(
             mode=mode,
             top_k=_positive_int(retrieval.get("top_k"), "retrieval.top_k"),
@@ -349,6 +407,51 @@ def _load_domain(path: Path) -> DomainProfile:
             direction=graph_direction,
             relationship_types=tuple(str(item) for item in relationship_types),
         ),
+    )
+
+
+def _security_model(raw: dict[str, Any]):
+    from sovereignflow.domain import (
+        SecurityModel,
+        SecurityModelKind,
+    )
+
+    kind_raw = _required(raw.get("kind"), "security.security_model.kind").lower()
+    try:
+        kind = SecurityModelKind(kind_raw)
+    except ValueError as exc:
+        raise ConfigurationError(
+            "security.security_model.kind must be none, clearance_level or classification_labels"
+        ) from exc
+    if kind == SecurityModelKind.NONE:
+        return SecurityModel.none()
+    if kind == SecurityModelKind.CLEARANCE_LEVEL:
+        clearance_raw = raw.get("clearance_level")
+        levels = (
+            clearance_raw.get("levels") if isinstance(clearance_raw, dict) else raw.get("levels")
+        )
+        if not isinstance(levels, dict):
+            raise ConfigurationError(
+                "security.security_model.clearance_level.levels must be a mapping"
+            )
+        return SecurityModel(
+            kind,
+            clearance_level=ClearanceLevelModel(
+                {
+                    str(label): _non_negative_int(
+                        value,
+                        "security.security_model.levels[]",
+                    )
+                    for label, value in levels.items()
+                }
+            ),
+        )
+    labels = raw.get("labels_universe_subset")
+    if not isinstance(labels, list):
+        raise ConfigurationError("security.security_model.labels_universe_subset must be a list")
+    return SecurityModel(
+        kind,
+        classification_labels=ClassificationLabelsModel(tuple(str(label) for label in labels)),
     )
 
 
@@ -401,6 +504,16 @@ def _positive_int(value: Any, field_name: str) -> int:
         raise ConfigurationError(f"{field_name} must be an integer") from exc
     if result <= 0:
         raise ConfigurationError(f"{field_name} must be greater than zero")
+    return result
+
+
+def _non_negative_int(value: Any, field_name: str) -> int:
+    try:
+        result = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ConfigurationError(f"{field_name} must be an integer") from exc
+    if result < 0:
+        raise ConfigurationError(f"{field_name} must be non-negative")
     return result
 
 

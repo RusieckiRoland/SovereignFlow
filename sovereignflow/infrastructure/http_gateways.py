@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import urllib.error
 import urllib.request
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -27,8 +27,8 @@ class ModelEndpoint:
     output_cost_per_million: float
 
     def __post_init__(self) -> None:
-        if self.scope not in {"local", "external"}:
-            raise ValidationError("ModelEndpoint.scope must be 'local' or 'external'")
+        if self.scope not in {"internal", "external"}:
+            raise ValidationError("ModelEndpoint.scope must be 'internal' or 'external'")
         if self.timeout_seconds <= 0:
             raise ValidationError("ModelEndpoint.timeout_seconds must be greater than zero")
         if self.input_cost_per_million < 0 or self.output_cost_per_million < 0:
@@ -138,19 +138,28 @@ class OpenAIModelGateway:
             timeout_seconds=self._endpoint.timeout_seconds,
         )
 
-    def generate(self, *, system_prompt: str, user_prompt: str) -> ModelGeneration:
+    def generate(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        generation_parameters: Mapping[str, Any] | None = None,
+    ) -> ModelGeneration:
+        payload = {
+            "model": self._endpoint.model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "temperature": 0.1,
+        }
+        if generation_parameters is not None:
+            payload.update(generation_parameters)
         response = self._http.post(
             url=f"{self._endpoint.base_url.rstrip('/')}/chat/completions",
             api_key=self._endpoint.api_key,
             timeout_seconds=self._endpoint.timeout_seconds,
-            payload={
-                "model": self._endpoint.model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                "temperature": 0.1,
-            },
+            payload=payload,
         )
         try:
             content = response["choices"][0]["message"]["content"]

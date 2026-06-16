@@ -12,6 +12,7 @@ from sovereignflow.domain import (
     DatasetImportStatus,
     DependencyUnavailableError,
     DocumentChunk,
+    DocumentSecurity,
     DomainProfile,
     GraphDirection,
     GraphNodeRef,
@@ -93,7 +94,7 @@ def test_document_ingestion_round_trip_across_postgresql_and_weaviate() -> None:
             retrieval=RetrievalProfile(SearchMode.SEMANTIC, 10, 1000),
             graph=GraphTraversalProfile(False, 1, 1, GraphDirection.BOTH),
             allowed_acl_labels=("public",),
-            max_classification_level=1,
+            max_security=DocumentSecurity(clearance_label="PUBLIC"),
         )
         service = DocumentIngestionService(
             domain=profile,
@@ -136,7 +137,7 @@ def test_document_ingestion_round_trip_across_postgresql_and_weaviate() -> None:
                 mode=SearchMode.SEMANTIC,
                 filters={},
                 allowed_acl_labels=("public",),
-                max_classification_level=1,
+                max_security=DocumentSecurity(clearance_label="PUBLIC"),
             )
         )
         assert [hit.chunk.chunk_id for hit in hits] == ["chunk-1"]
@@ -188,7 +189,7 @@ def test_document_ingestion_round_trip_across_postgresql_and_weaviate() -> None:
                 direction=GraphDirection.OUTGOING,
                 relationship_types=("references",),
                 allowed_acl_labels=("public",),
-                max_classification_level=1,
+                max_security=DocumentSecurity(clearance_label="PUBLIC"),
             )
         )
         assert [item.chunk.source_id for item in graph_hits] == [target_source_id]
@@ -271,7 +272,7 @@ def test_dataset_import_full_lifecycle_across_real_adapters(
             retrieval=RetrievalProfile(SearchMode.SEMANTIC, 10, 1000),
             graph=GraphTraversalProfile(True, 4, 20, GraphDirection.BOTH),
             allowed_acl_labels=("public", "internal"),
-            max_classification_level=2,
+            max_security=DocumentSecurity(clearance_label="INTERNAL"),
         )
         service = DatasetImportService(
             domain=profile,
@@ -354,7 +355,7 @@ def test_dataset_import_full_lifecycle_across_real_adapters(
                 direction=GraphDirection.OUTGOING,
                 relationship_types=("references",),
                 allowed_acl_labels=("public",),
-                max_classification_level=2,
+                max_security=DocumentSecurity(clearance_label="INTERNAL"),
             )
         )
         assert [hit.chunk.source_id for hit in graph_hits] == [source_b]
@@ -453,7 +454,7 @@ def ingestion_command(
                 source_id=source_id,
                 text=f"content-{version}-{chunk_id}",
                 acl_labels=("public",),
-                classification_level=1,
+                security=DocumentSecurity(clearance_label="PUBLIC"),
             )
             for chunk_id in chunk_ids
         ),
@@ -510,7 +511,7 @@ def dataset_chunk(
         text=text,
         metadata={"kind": "neutral"},
         acl_labels=("public",),
-        classification_level=1,
+        security=DocumentSecurity(clearance_label="PUBLIC"),
     )
 
 
@@ -538,7 +539,10 @@ def dataset_node(
         "text": chunk.text,
         "metadata": dict(chunk.metadata),
         "acl_labels": list(chunk.acl_labels),
-        "classification_level": chunk.classification_level,
+        "security": {
+            "clearance_label": chunk.security.clearance_label,
+            "classification_labels": list(chunk.security.classification_labels),
+        },
     }
 
 

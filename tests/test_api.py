@@ -446,6 +446,24 @@ def test_protected_diagnostics_are_serialized(domain_profile, search_hit) -> Non
     assert diagnostics["context_chunk_ids"] == ["chunk-1"]
     assert diagnostics["provider"] == "stub-provider"
     assert diagnostics["model"] == "stub-model"
+    assert diagnostics["prompt_key"] == "answer"
+    assert diagnostics["model_transmission"] == {
+        "checked": True,
+        "allowed": True,
+        "reason_code": "model_server_allowed",
+        "selected_model_server_id": "default-model",
+        "final_model_server_id": "default-model",
+        "rerouted": False,
+        "trust_boundary": "internal",
+        "external_transmission": "allowed",
+        "context_security_requirement": {
+            "security_model_kind": "clearance_level",
+            "clearance_label": "PUBLIC",
+            "classification_labels": [],
+        },
+        "checked_chunk_ids": ["chunk-1"],
+        "blocked_chunk_ids": [],
+    }
     assert diagnostics["pipeline_trace"][-1] == "finalize"
     assert payload["retrieval_trace"]["seed_nodes"][0]["chunk_id"] == "chunk-1"
     assert payload["retrieval_trace"]["graph_nodes"] == []

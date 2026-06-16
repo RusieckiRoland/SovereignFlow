@@ -14,6 +14,7 @@ from sovereignflow.domain import (
     AuthenticationError,
     AuthorizationContext,
     DependencyUnavailableError,
+    SubjectSecurity,
 )
 
 
@@ -29,7 +30,8 @@ class OidcSettings:
     roles_claim: str
     groups_claim: str
     acl_claim: str
-    classification_claim: str
+    clearance_claim: str
+    classification_labels_claim: str
     external_model_claim: str
     diagnostic_claim: str
 
@@ -127,9 +129,15 @@ class OidcJwtAuthenticator:
             roles=_string_tuple(claims, self._settings.roles_claim),
             groups=_string_tuple(claims, self._settings.groups_claim),
             acl_labels=_string_tuple(claims, self._settings.acl_claim),
-            max_classification_level=_classification(
-                claims,
-                self._settings.classification_claim,
+            security=SubjectSecurity(
+                clearance_label=_optional_string_claim(
+                    claims,
+                    self._settings.clearance_claim,
+                ),
+                classification_labels=_string_tuple(
+                    claims,
+                    self._settings.classification_labels_claim,
+                ),
             ),
             allow_external_model=_boolean_claim(
                 claims,
@@ -173,13 +181,13 @@ def _string_tuple(claims: Mapping[str, Any], name: str) -> tuple[str, ...]:
     return tuple(value)
 
 
-def _classification(claims: Mapping[str, Any], name: str) -> int | None:
+def _optional_string_claim(claims: Mapping[str, Any], name: str) -> str | None:
     value = _claim_value(claims, name)
     if value is None:
         return None
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        raise AuthenticationError(f"Access token claim must be a non-negative integer: {name}")
-    return value
+    if not isinstance(value, str) or not value.strip():
+        raise AuthenticationError(f"Access token claim must be a non-empty string: {name}")
+    return value.strip()
 
 
 def _boolean_claim(claims: Mapping[str, Any], name: str) -> bool:

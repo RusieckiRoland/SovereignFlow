@@ -12,6 +12,7 @@ from sovereignflow.domain import (
     DatasetImportRun,
     DatasetImportStatus,
     DocumentChunk,
+    DocumentSecurity,
     DomainProfile,
     GraphDirection,
     GraphNodeRef,
@@ -29,6 +30,8 @@ from sovereignflow.domain import (
     SearchHit,
     SearchMode,
     SearchRequest,
+    SecurityModel,
+    SubjectSecurity,
     ValidationError,
 )
 
@@ -61,8 +64,8 @@ def test_domain_models_normalize_and_freeze_values() -> None:
     assert generation.text == "answer"
     assert generation.total_tokens == 15
 
-    with pytest.raises(ValidationError, match="cannot be negative"):
-        AuthorizationContext("subject", "tenant", max_classification_level=-1)
+    with pytest.raises(ValidationError, match="clearance_label"):
+        DocumentSecurity(clearance_label="")
 
 
 def test_graph_models_normalize_and_freeze_values(search_hit) -> None:
@@ -84,7 +87,8 @@ def test_graph_models_normalize_and_freeze_values(search_hit) -> None:
         direction=GraphDirection.OUTGOING,
         relationship_types=("references",),
         allowed_acl_labels=("public", "public"),
-        max_classification_level=1,
+        security_model=SecurityModel.none(),
+        subject_security=SubjectSecurity(),
     )
 
     assert node == GraphNodeRef("source", "chunk")
@@ -128,7 +132,8 @@ def test_graph_models_normalize_and_freeze_values(search_hit) -> None:
                 GraphDirection.BOTH,
                 (),
                 (),
-                None,
+                SecurityModel.none(),
+                SubjectSecurity(),
             ),
             "seeds",
         ),
@@ -142,7 +147,8 @@ def test_graph_models_normalize_and_freeze_values(search_hit) -> None:
                 GraphDirection.BOTH,
                 (),
                 (),
-                None,
+                SecurityModel.none(),
+                SubjectSecurity(),
             ),
             "max_depth",
         ),
@@ -156,7 +162,8 @@ def test_graph_models_normalize_and_freeze_values(search_hit) -> None:
                 GraphDirection.BOTH,
                 (),
                 (),
-                None,
+                SecurityModel.none(),
+                SubjectSecurity(),
             ),
             "max_nodes",
         ),
@@ -168,23 +175,10 @@ def test_graph_models_normalize_and_freeze_values(search_hit) -> None:
                 1,
                 1,
                 GraphDirection.BOTH,
-                (),
-                (),
-                -1,
-            ),
-            "classification",
-        ),
-        (
-            lambda: GraphTraversalRequest(
-                (SearchHit(DocumentChunk("c", "d", "t", "s", "x"), 1, "x"),),
-                "domain",
-                "tenant",
-                1,
-                1,
-                GraphDirection.BOTH,
                 ("",),
                 (),
-                None,
+                SecurityModel.none(),
+                SubjectSecurity(),
             ),
             "relationship_types",
         ),
@@ -198,7 +192,8 @@ def test_graph_models_normalize_and_freeze_values(search_hit) -> None:
                 GraphDirection.BOTH,
                 (),
                 ("",),
-                None,
+                SecurityModel.none(),
+                SubjectSecurity(),
             ),
             "allowed_acl_labels",
         ),
@@ -216,10 +211,7 @@ def test_graph_models_reject_invalid_values(factory, message: str) -> None:
             lambda: DocumentChunk("", "d", "t", "s", "x"),
             "DocumentChunk.chunk_id",
         ),
-        (
-            lambda: DocumentChunk("c", "d", "t", "s", "x", classification_level=-1),
-            "classification_level",
-        ),
+        (lambda: DocumentSecurity(clearance_label=""), "clearance_label"),
         (
             lambda: DocumentChunk("c", "d", "t", "s", "x", acl_labels=("",)),
             "acl_labels",
@@ -258,9 +250,9 @@ def test_graph_models_reject_invalid_values(factory, message: str) -> None:
                 False,
                 RetrievalProfile(SearchMode.HYBRID, 1, 1),
                 GraphTraversalProfile(False, 1, 1, GraphDirection.BOTH),
-                max_classification_level=-1,
+                security_model="bad",  # type: ignore[arg-type]
             ),
-            "max_classification",
+            "security_model",
         ),
         (
             lambda: DomainProfile(
@@ -285,7 +277,8 @@ def test_graph_models_reject_invalid_values(factory, message: str) -> None:
                 SearchMode.HYBRID,
                 {},
                 (),
-                None,
+                SecurityModel.none(),
+                SubjectSecurity(),
             ),
             "SearchRequest.query",
         ),
@@ -298,7 +291,8 @@ def test_graph_models_reject_invalid_values(factory, message: str) -> None:
                 SearchMode.HYBRID,
                 {},
                 (),
-                None,
+                SecurityModel.none(),
+                SubjectSecurity(),
             ),
             "SearchRequest.top_k",
         ),
@@ -369,10 +363,22 @@ def test_pipeline_models_validate_invariants() -> None:
         "router",
         "1.0",
         routes={" selected ": " end "},
+        config={"nested": {"items": ["a", 1, True, None]}},
     )
     assert dict(routed.routes) == {"selected": "end"}
+    assert routed.config["nested"]["items"] == ("a", 1, True, None)
     with pytest.raises(ValidationError, match="routes key"):
         PipelineStepDefinition("route", "router", "1.0", routes={"": "end"})
+    with pytest.raises(ValidationError, match="config must be a mapping"):
+        PipelineStepDefinition("route", "router", "1.0", routes={"ok": "end"}, config=[])
+    with pytest.raises(ValidationError, match="JSON-compatible"):
+        PipelineStepDefinition(
+            "route",
+            "router",
+            "1.0",
+            routes={"ok": "end"},
+            config={"bad": object()},
+        )
 
 
 def test_pipeline_audit_models_require_valid_values() -> None:

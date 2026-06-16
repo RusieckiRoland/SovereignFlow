@@ -11,13 +11,17 @@ from conftest import (
     StubRetrieval,
     authorization_context,
     build_query_service,
+    default_pipeline,
 )
 
+from sovereignflow.application import PipelineEngine, default_action_registry
 from sovereignflow.domain import (
     DocumentChunk,
+    DocumentSecurity,
     PolicyViolationError,
     QueryCommand,
     SearchHit,
+    SubjectSecurity,
 )
 
 
@@ -56,21 +60,43 @@ def test_query_service_executes_complete_vertical_flow(
         "normalize_query",
         "retrieve",
         "expand_graph",
-        "build_context",
+        "manage_context_budget",
+        "enforce_model_transmission_policy",
         "call_model",
         "finalize",
     )
     assert result.citations[0].score_type == "hybrid"
     assert retrieval.requests[0].query == "evidence question"
+    assert retrieval.requests[0].mode.value == "hybrid"
+    assert retrieval.requests[0].top_k == 3
     assert dict(retrieval.requests[0].filters) == {
         "status": "active",
         "country": "PL",
     }
     assert "Evidence text." in model.calls[0]["user_prompt"]
+    assert model.calls[0]["generation_parameters"] == {}
     assert prompts.names == ["answer"]
     assert audit.started[0].pipeline_checksum == "a" * 64
     assert [item.step_id for item in audit.steps] == list(result.pipeline_trace)
     assert audit.succeeded[0][1]["citation_count"] == 1
+
+
+def test_query_service_requires_configured_model_server(domain_profile) -> None:
+    from sovereignflow.application import RagQueryService
+
+    with pytest.raises(PolicyViolationError, match="At least one model server"):
+        RagQueryService(
+            domain=domain_profile,
+            retrieval=StubRetrieval(),
+            graph=StubGraph(),
+            model_servers={},
+            prompts=StubPrompts(),
+            pipeline=default_pipeline(),
+            engine=PipelineEngine(
+                registry=default_action_registry(),
+                audit=StubAudit(),
+            ),
+        )
 
 
 def test_query_service_expands_graph_with_explicit_policy(
@@ -109,17 +135,24 @@ def test_query_service_skips_graph_when_explicitly_disabled(
     search_hit,
 ) -> None:
     graph = StubGraph()
-    domain = replace(
-        domain_profile,
-        graph=replace(domain_profile.graph, enabled=False),
+    pipeline = pipeline_with_config(
+        "expand_graph",
+        {
+            "enabled": False,
+            "max_depth": 2,
+            "max_nodes": 10,
+            "direction": "both",
+            "relationship_types": ["references"],
+        },
     )
 
     build_query_service(
-        domain=domain,
+        domain=domain_profile,
         retrieval=StubRetrieval((search_hit,)),
         graph=graph,
         model=StubModel(),
         prompts=StubPrompts(),
+        pipeline=pipeline,
     ).execute(command())
 
     assert graph.requests == []
@@ -168,44 +201,54 @@ def test_query_service_uses_explicit_no_evidence_message(domain_profile) -> None
 
 
 def test_context_is_truncated_at_configured_limit(domain_profile, search_hit) -> None:
-    domain = replace(
-        domain_profile,
-        retrieval=replace(domain_profile.retrieval, max_context_characters=20),
-    )
     second = replace(
         search_hit,
         chunk=replace(search_hit.chunk, chunk_id="chunk-2", source_id="source-2"),
     )
     model = StubModel()
     service = build_query_service(
-        domain=domain,
+        domain=domain_profile,
         retrieval=StubRetrieval((search_hit, second)),
         model=model,
         prompts=StubPrompts(),
+        pipeline=pipeline_with_config(
+            "manage_context_budget",
+            {
+                "source": "hits",
+                "target": "evidence",
+                "max_context_characters": 20,
+            },
+        ),
     )
 
     result = service.execute(command())
 
-    evidence = (
-        model.calls[0]["user_prompt"]
-        .split("EVIDENCE\n", 1)[1]
-        .split(
-            "\n\nAnswer",
-            1,
-        )[0]
-    )
+    evidence = model.calls[0]["user_prompt"].split("EVIDENCE\n", 1)[1].strip()
     assert len(evidence) == 20
     assert len(result.citations) == 1
 
 
-def test_external_model_requires_domain_permission(domain_profile) -> None:
-    with pytest.raises(PolicyViolationError, match="does not allow external"):
-        build_query_service(
-            domain=domain_profile,
-            retrieval=StubRetrieval(),
-            model=StubModel(scope="external"),
-            prompts=StubPrompts(),
-        )
+def pipeline_with_config(step_id: str, config: dict):
+    pipeline = default_pipeline()
+    return replace(
+        pipeline,
+        steps=tuple(
+            replace(step, config=config) if step.step_id == step_id else step
+            for step in pipeline.steps
+        ),
+    )
+
+
+def test_external_model_requires_domain_permission_at_policy_step(domain_profile) -> None:
+    service = build_query_service(
+        domain=domain_profile,
+        retrieval=StubRetrieval(),
+        model=StubModel(scope="external"),
+        prompts=StubPrompts(),
+    )
+
+    with pytest.raises(PolicyViolationError, match="external_model_not_allowed_for_subject"):
+        service.execute(command())
 
 
 def test_query_domain_must_match_service(domain_profile) -> None:
@@ -230,12 +273,12 @@ def test_query_security_is_derived_from_authenticated_user(
         restricted,
         authorization=authorization_context(
             acl_labels=("public", "unknown"),
-            max_classification_level=0,
+            security=SubjectSecurity(clearance_label="PUBLIC"),
         ),
     )
     forbidden_hit = replace(
         search_hit,
-        chunk=replace(search_hit.chunk, classification_level=1),
+        chunk=replace(search_hit.chunk, security=DocumentSecurity(clearance_label="INTERNAL")),
     )
     retrieval.hits = (forbidden_hit,)
     service = build_query_service(
@@ -245,10 +288,10 @@ def test_query_security_is_derived_from_authenticated_user(
         prompts=StubPrompts(),
     )
 
-    with pytest.raises(PolicyViolationError, match="classification"):
+    with pytest.raises(PolicyViolationError, match="security"):
         service.execute(restricted)
     assert retrieval.requests[0].allowed_acl_labels == ("public",)
-    assert retrieval.requests[0].max_classification_level == 0
+    assert retrieval.requests[0].subject_security.clearance_label == "PUBLIC"
 
 
 def test_query_rejects_foreign_tenant_forbidden_filter_and_diagnostics(
@@ -287,7 +330,7 @@ def test_external_model_requires_user_permission(domain_profile) -> None:
         model=StubModel(scope="external"),
         prompts=StubPrompts(),
     )
-    with pytest.raises(PolicyViolationError, match="authenticated user"):
+    with pytest.raises(PolicyViolationError, match="external_model_not_allowed_for_subject"):
         service.execute(command())
 
     result = service.execute(
@@ -299,26 +342,18 @@ def test_external_model_requires_user_permission(domain_profile) -> None:
     assert result.answer
 
 
-def test_effective_classification_supports_unbounded_domain_and_user(
+def test_query_passes_domain_security_model_to_retrieval(
     domain_profile,
 ) -> None:
     retrieval = StubRetrieval()
     service = build_query_service(
-        domain=replace(domain_profile, max_classification_level=None),
+        domain=domain_profile,
         retrieval=retrieval,
         model=StubModel(),
         prompts=StubPrompts(),
     )
     service.execute(command())
-    assert retrieval.requests[-1].max_classification_level == 1
-
-    service.execute(
-        replace(
-            command(),
-            authorization=authorization_context(max_classification_level=None),
-        )
-    )
-    assert retrieval.requests[-1].max_classification_level is None
+    assert retrieval.requests[-1].security_model == domain_profile.security_model
 
 
 @pytest.mark.parametrize(
@@ -350,9 +385,9 @@ def test_effective_classification_supports_unbounded_domain_and_user(
                 "tenant-a",
                 "s",
                 "text",
-                classification_level=2,
+                security=DocumentSecurity(clearance_label="INTERNAL"),
             ),
-            "classification",
+            "security",
         ),
     ],
 )

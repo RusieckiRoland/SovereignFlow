@@ -37,7 +37,7 @@ def node(
         "text": f"text {selected_chunk}",
         "metadata": {"kind": "synthetic"},
         "acl_labels": ["public"],
-        "classification_level": 1,
+        "security": {"clearance_label": "PUBLIC", "classification_labels": []},
     }
 
 
@@ -380,7 +380,7 @@ def test_reader_rejects_missing_file_and_invalid_constructor(tmp_path: Path) -> 
     [
         ("metadata", [], "metadata"),
         ("acl_labels", [1], "ACL"),
-        ("classification_level", True, "classification"),
+        ("security", [], "security"),
         ("source_uri", 1, "source_uri"),
         ("text", "", "text"),
     ],

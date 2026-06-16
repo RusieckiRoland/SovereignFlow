@@ -226,9 +226,9 @@ async function renderSession() {
   elements.tenantId.textContent = claims.tenant_id || "Not provided";
   elements.aclLabels.textContent = (claims.acl_labels || []).join(", ") || "None";
   elements.classificationLevel.textContent =
-    claims.max_classification_level === undefined
-      ? "Not provided"
-      : claims.max_classification_level;
+    claims.clearance_label ||
+    (claims.classification_labels || []).join(", ") ||
+    "Not provided";
   setQueryEnabled(false);
   await loadCatalog();
   setQueryEnabled(capabilities.length > 0);
