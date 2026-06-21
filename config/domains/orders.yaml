@@ -1,6 +1,6 @@
-name: general
-description: General-purpose knowledge assistant
-collection: SovereignFlowGeneral
+name: Orders_000001
+description: Neutral synthetic Orders demonstration dataset
+collection: SovereignFlowOrders
 tenant_id: tenant_0001
 prompt_name: answer
 pipeline_name: default
@@ -10,13 +10,15 @@ allowed_pipeline_names:
   - graph
   - strict
 allow_external_model: false
-disclaimer: |
-  This response is generated from retrieved source material and should be verified by the user.
+disclaimer: Synthetic demo data only.
 security:
   acl:
     enabled: true
-    allowed_labels: []
-  require_travel_permission: true
+    allowed_labels:
+      - public
+      - internal
+      - restricted
+  require_travel_permission: false
   security_model:
     kind: none
 retrieval:

@@ -1,0 +1,64 @@
+server:
+  host: 127.0.0.1
+  port: 8000
+  threads: 4
+
+postgresql:
+  connection_url_env: SF_POSTGRES_URL
+  timeout_seconds: 10
+
+admin:
+  api_key_env: SF_ADMIN_API_KEY
+
+identity_provider:
+  issuer: https://auth.taricai.com/realms/sovereignflow
+  audience: sovereignflow-api
+  jwks_url: https://auth.taricai.com/realms/sovereignflow/protocol/openid-connect/certs
+  algorithms: [RS256]
+  timeout_seconds: 10
+  cache_ttl_seconds: 300
+  tenant_claim: tenant_id
+  roles_claim: roles
+  groups_claim: groups
+  acl_claim: acl_labels
+  clearance_claim: clearance_label
+  classification_labels_claim: classification_labels
+  external_model_claim: allow_external_model
+  diagnostic_claim: sovereignflow_diagnostics
+
+web_client:
+  client_id: sovereignflow-web-client
+  authorization_url: https://auth.taricai.com/realms/sovereignflow/protocol/openid-connect/auth
+  token_url: https://auth.taricai.com/realms/sovereignflow/protocol/openid-connect/token
+  logout_url: https://auth.taricai.com/realms/sovereignflow/protocol/openid-connect/logout
+
+model_servers:
+  - id: default-model
+    trust_boundary: external
+    base_url: https://api.openai.com/v1
+    model: gpt-4o-mini
+    api_key_env: OPENAI_API_KEY
+    timeout_seconds: 120
+    input_cost_per_million: 0.15
+    output_cost_per_million: 0.60
+    security_profile:
+      kind: none
+
+embeddings:
+  name: ollama-embeddings
+  base_url: http://127.0.0.1:11434/v1
+  model: nomic-embed-text
+  timeout_seconds: 60
+
+weaviate:
+  host: 127.0.0.1
+  http_port: 8080
+  grpc_port: 50051
+  secure: false
+  api_key_env: SF_WEAVIATE_API_KEY
+
+prompts_root: ../prompts/general
+pipelines_root: ../pipelines
+domains:
+  - domains/general.yaml
+  - domains/orders.yaml

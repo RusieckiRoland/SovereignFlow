@@ -7,6 +7,7 @@ from typing import Any
 from flask import Flask
 
 from sovereignflow.application import (
+    ConversationHistoryService,
     DocumentIngestionService,
     HealthProbe,
     OperationsService,
@@ -28,6 +29,7 @@ from sovereignflow.infrastructure import (
     OpenAIEmbeddingGateway,
     OpenAIModelGateway,
     PostgreSQLAccessPolicyRepository,
+    PostgreSQLConversationHistory,
     PostgreSQLExecutionAudit,
     PostgreSQLGraphTraversal,
     PostgreSQLHealthProbe,
@@ -129,6 +131,11 @@ def bootstrap(settings: SovereignFlowSettings) -> BootstrappedApplication:
         settings.postgresql.connection_url,
         timeout_seconds=settings.postgresql.timeout_seconds,
     )
+    conversation_history_repository = PostgreSQLConversationHistory(
+        settings.postgresql.connection_url,
+        timeout_seconds=settings.postgresql.timeout_seconds,
+    )
+    conversation_history = ConversationHistoryService(conversation_history_repository)
     access_policies = PostgreSQLAccessPolicyRepository(
         settings.postgresql.connection_url,
         timeout_seconds=settings.postgresql.timeout_seconds,
@@ -162,6 +169,7 @@ def bootstrap(settings: SovereignFlowSettings) -> BootstrappedApplication:
                     prompts=prompts,
                     pipeline=pipeline,
                     engine=engine,
+                    conversation_history=conversation_history,
                 )
             ingestion_services[domain.name] = DocumentIngestionService(
                 domain=domain,
@@ -183,6 +191,7 @@ def bootstrap(settings: SovereignFlowSettings) -> BootstrappedApplication:
             audit,
             ingestion_repository,
             graph,
+            conversation_history_repository,
             access_policies,
             WeaviateHealthProbe(client),
             _GatewayHealthProbe(name="embeddings", gateway=embeddings),
@@ -233,6 +242,7 @@ def bootstrap(settings: SovereignFlowSettings) -> BootstrappedApplication:
                         domain.name: domain.allowed_pipeline_names for domain in settings.domains
                     },
                 ),
+                conversation_history,
             ),
             weaviate_client=client,
             ingestion_services=ingestion_services,

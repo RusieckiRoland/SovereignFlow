@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from conftest import (
@@ -17,13 +19,21 @@ from conftest import (
 
 from sovereignflow.application import (
     ActionRegistry,
+    ConversationHistoryService,
     PipelineContext,
     PipelineEngine,
     PipelineValidator,
     default_action_registry,
 )
 from sovereignflow.application import pipeline as pipeline_module
+from sovereignflow.application.actions import _conversation as conversation_module
+from sovereignflow.application.actions import _retrieval as retrieval_module
+from sovereignflow.application.actions import _state as state_module
+from sovereignflow.application.actions import call_model as call_model_module
+from sovereignflow.application.actions import json_decision_router as json_decision_router_module
+from sovereignflow.application.actions import retrieve as retrieve_module
 from sovereignflow.domain import (
+    ConversationTurnStatus,
     PipelineDefinition,
     PipelineDefinitionError,
     PipelineExecutionError,
@@ -1013,7 +1023,7 @@ def test_call_model_rejects_unvalidated_source_at_runtime(domain_profile) -> Non
     )
 
     with pytest.raises(PipelineExecutionError, match="Unsupported call_model source"):
-        pipeline_module._source_value("domain", context)
+        call_model_module._source_value("domain", context)
 
 
 def test_retrieve_action_reads_query_mode_top_k_and_filters_from_yaml(domain_profile) -> None:
@@ -1069,7 +1079,7 @@ def test_retrieve_action_rejects_unvalidated_query_source_at_runtime(domain_prof
     )
 
     with pytest.raises(PipelineExecutionError, match="Unsupported retrieve query source"):
-        pipeline_module._retrieval_query("domain", context)
+        retrieve_module._retrieval_query("domain", context)
 
 
 def test_set_variables_maps_safe_state_fields_and_transforms(domain_profile) -> None:
@@ -1124,7 +1134,7 @@ def test_set_variables_maps_safe_state_fields_and_transforms(domain_profile) -> 
     ],
 )
 def test_set_variables_transform_values(transform, value, expected) -> None:
-    assert pipeline_module._transform_value(transform, value) == expected
+    assert state_module._transform_value(transform, value) == expected
 
 
 @pytest.mark.parametrize(
@@ -1139,7 +1149,7 @@ def test_set_variables_transform_values(transform, value, expected) -> None:
 )
 def test_set_variables_transform_errors(transform, value, message: str) -> None:
     with pytest.raises(PipelineExecutionError, match=message):
-        pipeline_module._transform_value(transform, value)
+        state_module._transform_value(transform, value)
 
 
 def test_set_variables_rejects_unsafe_runtime_target(domain_profile) -> None:
@@ -1153,34 +1163,34 @@ def test_set_variables_rejects_unsafe_runtime_target(domain_profile) -> None:
     )
 
     with pytest.raises(PipelineExecutionError, match="Unsupported state target"):
-        pipeline_module._set_state_value("tenant_id", "tenant-b", context)
+        state_module._set_state_value("tenant_id", "tenant-b", context)
 
     with pytest.raises(PipelineExecutionError, match="Unsupported state source"):
-        pipeline_module._state_value("tenant_id", context)
+        state_module._state_value("tenant_id", context)
 
     with pytest.raises(PipelineExecutionError, match="variables"):
-        pipeline_module._set_state_value("variables", "not-a-mapping", context)
+        state_module._set_state_value("variables", "not-a-mapping", context)
 
     with pytest.raises(PipelineExecutionError, match="answer"):
-        pipeline_module._set_state_value("answer", {"not": "string"}, context)
+        state_module._set_state_value("answer", {"not": "string"}, context)
 
-    pipeline_module._set_state_value("normalized_query", "normalized", context)
-    pipeline_module._set_state_value("evidence", "evidence", context)
-    pipeline_module._set_state_value("variables", {"safe": True}, context)
+    state_module._set_state_value("normalized_query", "normalized", context)
+    state_module._set_state_value("evidence", "evidence", context)
+    state_module._set_state_value("variables", {"safe": True}, context)
     assert context.normalized_query == "normalized"
     assert context.evidence == "evidence"
     assert context.variables == {"safe": True}
 
 
 def test_routing_helper_edge_cases() -> None:
-    assert pipeline_module._clear_value("text") == ""
-    assert pipeline_module._to_list(None) == []
-    assert pipeline_module._to_list(["a"]) == ["a"]
-    assert pipeline_module._to_list(("a",)) == ["a"]
-    assert pipeline_module._split_lines(None) == []
-    assert pipeline_module._json_decision({"mode": " Graph "}) == "graph"
-    assert pipeline_module._json_decision({"other": "value"}) == ""
-    assert pipeline_module._normalize_guard_query(" A   B ") == "a b"
+    assert state_module._clear_value("text") == ""
+    assert state_module._to_list(None) == []
+    assert state_module._to_list(["a"]) == ["a"]
+    assert state_module._to_list(("a",)) == ["a"]
+    assert state_module._split_lines(None) == []
+    assert json_decision_router_module._json_decision({"mode": " Graph "}) == "graph"
+    assert json_decision_router_module._json_decision({"other": "value"}) == ""
+    assert retrieval_module._normalize_guard_query(" A   B ") == "a b"
 
 
 def test_prefix_router_matches_prefix_and_cleans_payload(domain_profile) -> None:
@@ -1791,3 +1801,627 @@ def test_pipeline_engine_rejects_invalid_route_decisions(
             registry=ActionRegistry((Router(), Action())),
             audit=StubAudit(),
         ).execute(pipeline, context)
+
+
+class PipelineConversationRepository:
+    def __init__(self) -> None:
+        self.conversations = {}
+        self.turns = {}
+        self.failures = []
+
+    def create_conversation(self, conversation):
+        self.conversations[conversation.conversation_id] = conversation
+        self.turns[conversation.conversation_id] = []
+        return conversation
+
+    def list_conversations(self, *, tenant_id, subject_hash, limit):
+        return tuple(self.conversations.values())[:limit]
+
+    def get_conversation(self, *, conversation_id, tenant_id, subject_hash):
+        conversation = self.conversations.get(conversation_id)
+        if (
+            conversation
+            and conversation.tenant_id == tenant_id
+            and conversation.subject_hash == subject_hash
+        ):
+            return conversation
+        return None
+
+    def rename_conversation(self, *, conversation_id, tenant_id, subject_hash, title):
+        return None
+
+    def delete_conversation(self, *, conversation_id, tenant_id, subject_hash):
+        return False
+
+    def start_turn(self, turn):
+        existing = [
+            item for item in self.turns[turn.conversation_id] if item.request_id == turn.request_id
+        ]
+        if existing:
+            return existing[0]
+        stored = replace(turn, sequence_number=len(self.turns[turn.conversation_id]) + 1)
+        self.turns[turn.conversation_id].append(stored)
+        return stored
+
+    def finalize_turn(
+        self, *, conversation_id, turn_id, tenant_id, subject_hash, answer_text, metadata
+    ):
+        for index, turn in enumerate(self.turns[conversation_id]):
+            if turn.turn_id == turn_id:
+                stored = replace(
+                    turn,
+                    status=ConversationTurnStatus.FINALIZED,
+                    answer_text=answer_text,
+                    finalized_at="done",
+                    metadata=metadata,
+                )
+                self.turns[conversation_id][index] = stored
+                return stored
+        return None
+
+    def fail_turn(self, *, conversation_id, turn_id, tenant_id, subject_hash, error_code, metadata):
+        self.failures.append(error_code)
+        for index, turn in enumerate(self.turns[conversation_id]):
+            if turn.turn_id == turn_id:
+                stored = replace(
+                    turn,
+                    status=ConversationTurnStatus.FAILED,
+                    finalized_at="failed",
+                    error_code=error_code,
+                    metadata=metadata,
+                )
+                self.turns[conversation_id][index] = stored
+                return stored
+        return None
+
+    def list_turns(self, *, conversation_id, tenant_id, subject_hash, limit):
+        return tuple(self.turns[conversation_id][:limit])
+
+    def recent_finalized_turns(self, *, conversation_id, tenant_id, subject_hash, limit):
+        finalized = [
+            turn
+            for turn in self.turns[conversation_id]
+            if turn.status == ConversationTurnStatus.FINALIZED
+        ]
+        return tuple(finalized[-limit:])
+
+
+def conversation_pipeline() -> PipelineDefinition:
+    return definition(
+        step("normalize", action="normalize_query", next_step="resolve", terminal=False),
+        step(
+            "resolve",
+            action="resolve_conversation",
+            config={
+                "conversation_id_source": "request",
+                "create_if_missing": True,
+                "title_source": "query",
+            },
+            next_step="start_turn",
+            terminal=False,
+        ),
+        step(
+            "start_turn", action="start_conversation_turn", next_step="load_history", terminal=False
+        ),
+        step(
+            "load_history",
+            action="load_conversation_history",
+            config={"limit": 5, "max_characters": 200, "include_failed": False, "format": "dialog"},
+            next_step="retrieve",
+            terminal=False,
+        ),
+        step(
+            "retrieve",
+            action="retrieve",
+            config=retrieve_config(),
+            next_step="budget",
+            terminal=False,
+        ),
+        step(
+            "budget",
+            action="manage_context_budget",
+            config=context_budget_config(),
+            next_step="policy",
+            terminal=False,
+        ),
+        step(
+            "policy",
+            action="enforce_model_transmission_policy",
+            config=model_transmission_config(),
+            next_step="call_model",
+            terminal=False,
+        ),
+        step(
+            "call_model",
+            action="call_model",
+            config=call_model_config(
+                use_history=True,
+                history_source="conversation_history",
+                user_parts={
+                    "history": {"source": "conversation_history", "template": "H:{}\n"},
+                    "question": {"source": "normalized_query", "template": "Q:{}\n"},
+                    "evidence": {"source": "evidence", "template": "E:{}"},
+                },
+            ),
+            next_step="finalize",
+            terminal=False,
+        ),
+        step("finalize", action="finalize", next_step="save_turn", terminal=False),
+        step("save_turn", action="finalize_conversation_turn"),
+        entry="normalize",
+        maximum=12,
+    )
+
+
+def test_conversation_pipeline_creates_continues_and_finalizes_turns(domain_profile, search_hit):
+    repository = PipelineConversationRepository()
+    history = ConversationHistoryService(
+        repository,
+        id_factory=iter(("conversation-1", "turn-1", "turn-2")).__next__,
+        clock=lambda: datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    model = StubModel(answer="first answer")
+    first_context = PipelineContext(
+        command=QueryCommand(
+            "request-1", "first question", "general", "session", authorization_context()
+        ),
+        domain=domain_profile,
+        retrieval=StubRetrieval((search_hit,)),
+        graph=StubGraph(),
+        model=model,
+        prompts=StubPrompts(),
+        conversation_history=history,
+        model_servers=model_servers(default=model, clearance_label="INTERNAL"),
+    )
+    engine = PipelineEngine(
+        registry=default_action_registry(),
+        audit=StubAudit(),
+        run_id_factory=lambda: "00000000-0000-0000-0000-000000000101",
+    )
+
+    first = engine.execute(conversation_pipeline(), first_context)
+    model.answer = "second answer"
+    second_context = replace(
+        first_context,
+        command=QueryCommand(
+            "request-2",
+            "second question",
+            "general",
+            "session",
+            authorization_context(),
+            conversation_id=first.conversation_id,
+        ),
+    )
+    second = engine.execute(conversation_pipeline(), second_context)
+
+    assert first.conversation_id == "conversation-1"
+    assert first.turn_id == "turn-1"
+    assert second.turn_id == "turn-2"
+    assert repository.turns["conversation-1"][0].answer_text.endswith("Verify the result.")
+    assert "H:User: first question\nAssistant: first answer" in model.calls[1]["user_prompt"]
+
+
+def test_conversation_pipeline_marks_started_turn_failed_on_error(domain_profile):
+    repository = PipelineConversationRepository()
+    history = ConversationHistoryService(
+        repository,
+        id_factory=iter(("conversation-1", "turn-1")).__next__,
+        clock=lambda: datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    context = PipelineContext(
+        command=QueryCommand(
+            "request-1", "question", "general", "session", authorization_context()
+        ),
+        domain=domain_profile,
+        retrieval=StubRetrieval(()),
+        graph=StubGraph(),
+        model=StubModel(),
+        prompts=StubPrompts(),
+        conversation_history=history,
+        model_servers=model_servers(default=StubModel(), clearance_label="INTERNAL"),
+    )
+    pipeline = definition(
+        step("normalize", action="normalize_query", next_step="resolve", terminal=False),
+        step(
+            "resolve",
+            action="resolve_conversation",
+            config={
+                "conversation_id_source": "request",
+                "create_if_missing": True,
+                "title_source": "query",
+            },
+            next_step="start_turn",
+            terminal=False,
+        ),
+        step("start_turn", action="start_conversation_turn", next_step="evidence", terminal=False),
+        step("evidence", action="require_evidence"),
+        entry="normalize",
+        maximum=6,
+    )
+
+    with pytest.raises(PipelineExecutionError, match="evidence"):
+        PipelineEngine(
+            registry=default_action_registry(),
+            audit=StubAudit(),
+            run_id_factory=lambda: "00000000-0000-0000-0000-000000000102",
+        ).execute(pipeline, context)
+
+    assert repository.failures == ["pipeline_execution_error"]
+
+
+@pytest.mark.parametrize(
+    ("action", "config", "message"),
+    [
+        ("resolve_conversation", {}, "conversation_id_source"),
+        (
+            "resolve_conversation",
+            {"conversation_id_source": "body", "create_if_missing": True, "title_source": "query"},
+            "conversation_id_source",
+        ),
+        (
+            "resolve_conversation",
+            {
+                "conversation_id_source": "request",
+                "create_if_missing": "yes",
+                "title_source": "query",
+            },
+            "create_if_missing",
+        ),
+        (
+            "resolve_conversation",
+            {
+                "conversation_id_source": "request",
+                "create_if_missing": True,
+                "title_source": "body",
+            },
+            "title_source",
+        ),
+        ("start_conversation_turn", {"extra": True}, "unsupported"),
+        ("load_conversation_history", {}, "format"),
+        (
+            "load_conversation_history",
+            {"limit": 1, "max_characters": 10, "include_failed": True, "format": "dialog"},
+            "include_failed",
+        ),
+        (
+            "load_conversation_history",
+            {"limit": 1, "max_characters": 10, "include_failed": False, "format": "raw"},
+            "format",
+        ),
+        ("finalize_conversation_turn", {"extra": True}, "unsupported"),
+        ("fail_conversation_turn", {"extra": True}, "unsupported"),
+    ],
+)
+def test_conversation_actions_reject_invalid_yaml_contracts(action, config, message):
+    pipeline = definition(step("start", action=action, config=config))
+
+    with pytest.raises(PipelineDefinitionError, match=message):
+        PipelineValidator(default_action_registry()).validate(pipeline)
+
+
+def test_conversation_actions_runtime_guards(domain_profile):
+    context = PipelineContext(
+        command=QueryCommand("request", "question", "general", "session", authorization_context()),
+        domain=domain_profile,
+        retrieval=StubRetrieval(),
+        graph=StubGraph(),
+        model=StubModel(),
+        prompts=StubPrompts(),
+    )
+    registry = default_action_registry()
+
+    with pytest.raises(PipelineExecutionError, match="service"):
+        registry.get("resolve_conversation").execute(
+            step(
+                "resolve",
+                action="resolve_conversation",
+                config={
+                    "conversation_id_source": "request",
+                    "create_if_missing": True,
+                    "title_source": "query",
+                },
+            ),
+            context,
+        )
+    with pytest.raises(PipelineExecutionError, match="starting"):
+        registry.get("start_conversation_turn").execute(
+            step("start", action="start_conversation_turn"),
+            replace(context, conversation_history=object()),
+        )
+    with pytest.raises(PipelineExecutionError, match="loading"):
+        registry.get("load_conversation_history").execute(
+            step(
+                "load",
+                action="load_conversation_history",
+                config={
+                    "limit": 1,
+                    "max_characters": 10,
+                    "include_failed": False,
+                    "format": "dialog",
+                },
+            ),
+            replace(context, conversation_history=object()),
+        )
+    with pytest.raises(PipelineExecutionError, match="finalization"):
+        registry.get("finalize_conversation_turn").execute(
+            step("finalize", action="finalize_conversation_turn"),
+            replace(context, conversation_history=object()),
+        )
+    with pytest.raises(PipelineExecutionError, match="requires answer"):
+        registry.get("finalize_conversation_turn").execute(
+            step("finalize", action="finalize_conversation_turn"),
+            replace(
+                context,
+                conversation_history=object(),
+                conversation_id="conversation",
+                conversation_turn_id="turn",
+            ),
+        )
+    with pytest.raises(PipelineExecutionError, match="marking failure"):
+        registry.get("fail_conversation_turn").execute(
+            step("fail", action="fail_conversation_turn"),
+            replace(context, conversation_history=object()),
+        )
+
+
+def test_resolve_conversation_requires_existing_id_when_creation_is_disabled(domain_profile):
+    repository = PipelineConversationRepository()
+    history = ConversationHistoryService(
+        repository,
+        id_factory=iter(("conversation-1",)).__next__,
+        clock=lambda: datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    context = PipelineContext(
+        command=QueryCommand("request", "question", "general", "session", authorization_context()),
+        domain=domain_profile,
+        retrieval=StubRetrieval(),
+        graph=StubGraph(),
+        model=StubModel(),
+        prompts=StubPrompts(),
+        conversation_history=history,
+    )
+
+    with pytest.raises(PipelineExecutionError, match="Conversation id"):
+        default_action_registry().get("resolve_conversation").execute(
+            step(
+                "resolve",
+                action="resolve_conversation",
+                config={
+                    "conversation_id_source": "request",
+                    "create_if_missing": False,
+                    "title_source": "query",
+                },
+            ),
+            context,
+        )
+
+
+def test_resolve_conversation_accepts_existing_conversation(domain_profile):
+    repository = PipelineConversationRepository()
+    history = ConversationHistoryService(
+        repository,
+        id_factory=iter(("conversation-1",)).__next__,
+        clock=lambda: datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    authorization = authorization_context()
+    conversation = history.create(
+        authorization, session_id="session", domain="general", title="Title"
+    )
+    context = PipelineContext(
+        command=QueryCommand(
+            "request",
+            "question",
+            "general",
+            "session",
+            authorization,
+            conversation_id=conversation.conversation_id,
+        ),
+        domain=domain_profile,
+        retrieval=StubRetrieval(),
+        graph=StubGraph(),
+        model=StubModel(),
+        prompts=StubPrompts(),
+        conversation_history=history,
+    )
+
+    default_action_registry().get("resolve_conversation").execute(
+        step(
+            "resolve",
+            action="resolve_conversation",
+            config={
+                "conversation_id_source": "request",
+                "create_if_missing": False,
+                "title_source": "query",
+            },
+        ),
+        context,
+    )
+
+    assert context.conversation_id == "conversation-1"
+
+
+@pytest.mark.parametrize(
+    ("config", "message"),
+    [
+        (call_model_config(use_history="yes"), "use_history"),
+        (call_model_config(use_history=True), "history_source"),
+        (call_model_config(history_source="conversation_history"), "requires use_history"),
+        (
+            call_model_config(
+                user_parts={"history": {"source": "conversation_history", "template": "{}"}}
+            ),
+            "requires use_history",
+        ),
+    ],
+)
+def test_call_model_rejects_invalid_history_contract(config, message):
+    pipeline = definition(step("start", action="call_model", config=config))
+
+    with pytest.raises(PipelineDefinitionError, match=message):
+        PipelineValidator(default_action_registry()).validate(pipeline)
+
+
+def test_conversation_private_helpers_cover_budget_and_invalid_sources(domain_profile):
+    turn_without_answer = pipeline_module.ConversationTurn(
+        "turn-1",
+        "conversation",
+        "request-1",
+        1,
+        "Q1",
+        ConversationTurnStatus.STARTED,
+        "created",
+    )
+    short_turn = pipeline_module.ConversationTurn(
+        "turn-2",
+        "conversation",
+        "request-2",
+        2,
+        "Q2",
+        ConversationTurnStatus.FINALIZED,
+        "created",
+        answer_text="A2",
+        finalized_at="done",
+    )
+    long_turn = pipeline_module.ConversationTurn(
+        "turn-3",
+        "conversation",
+        "request-3",
+        3,
+        "Q3",
+        ConversationTurnStatus.FINALIZED,
+        "created",
+        answer_text="A" * 100,
+        finalized_at="done",
+    )
+    context = PipelineContext(
+        command=SimpleNamespace(query="   "),
+        domain=domain_profile,
+        retrieval=StubRetrieval(),
+        graph=StubGraph(),
+        model=StubModel(),
+        prompts=StubPrompts(),
+    )
+
+    assert conversation_module._conversation_title("query", context) == "Untitled conversation"
+    with pytest.raises(PipelineExecutionError, match="title source"):
+        conversation_module._conversation_title("body", context)
+    assert (
+        conversation_module._format_conversation_history(
+            (turn_without_answer, long_turn, short_turn),
+            max_characters=40,
+        )
+        == "User: Q2\nAssistant: A2"
+    )
+    assert (
+        conversation_module._format_conversation_history(
+            (short_turn, short_turn, short_turn),
+            max_characters=50,
+        )
+        == "User: Q2\nAssistant: A2\n\nUser: Q2\nAssistant: A2"
+    )
+
+
+class FailingConversationRepository(PipelineConversationRepository):
+    def fail_turn(self, **kwargs):
+        raise RuntimeError("down")
+
+
+def test_engine_surfaces_history_failure_when_marking_turn_failed(domain_profile):
+    repository = FailingConversationRepository()
+    history = ConversationHistoryService(
+        repository,
+        id_factory=iter(("conversation-1", "turn-1")).__next__,
+        clock=lambda: datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    audit = StubAudit()
+    context = PipelineContext(
+        command=QueryCommand("request", "question", "general", "session", authorization_context()),
+        domain=domain_profile,
+        retrieval=StubRetrieval(()),
+        graph=StubGraph(),
+        model=StubModel(),
+        prompts=StubPrompts(),
+        conversation_history=history,
+    )
+    pipeline = definition(
+        step("normalize", action="normalize_query", next_step="resolve", terminal=False),
+        step(
+            "resolve",
+            action="resolve_conversation",
+            config={
+                "conversation_id_source": "request",
+                "create_if_missing": True,
+                "title_source": "query",
+            },
+            next_step="start_turn",
+            terminal=False,
+        ),
+        step("start_turn", action="start_conversation_turn", next_step="evidence", terminal=False),
+        step("evidence", action="require_evidence"),
+        entry="normalize",
+        maximum=6,
+    )
+
+    with pytest.raises(RuntimeError, match="down"):
+        PipelineEngine(
+            registry=default_action_registry(),
+            audit=audit,
+            run_id_factory=lambda: "00000000-0000-0000-0000-000000000103",
+        ).execute(pipeline, context)
+
+    assert audit.failed[0][1]["error_code"] == "internal_error"
+
+
+def test_fail_conversation_turn_action_marks_turn_failed(domain_profile):
+    repository = PipelineConversationRepository()
+    history = ConversationHistoryService(
+        repository,
+        id_factory=iter(("conversation-1", "turn-1")).__next__,
+        clock=lambda: datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    authorization = authorization_context()
+    conversation = history.create(
+        authorization, session_id="session", domain="general", title="Title"
+    )
+    turn = history.start_turn(
+        authorization,
+        conversation_id=conversation.conversation_id,
+        request_id="request-1",
+        question_text="Question?",
+    )
+    context = PipelineContext(
+        command=QueryCommand("request-1", "Question?", "general", "session", authorization),
+        domain=domain_profile,
+        retrieval=StubRetrieval(),
+        graph=StubGraph(),
+        model=StubModel(),
+        prompts=StubPrompts(),
+        conversation_history=history,
+        conversation_id=conversation.conversation_id,
+        conversation_turn_id=turn.turn_id,
+    )
+
+    result = (
+        default_action_registry()
+        .get("fail_conversation_turn")
+        .execute(
+            step("fail", action="fail_conversation_turn"),
+            context,
+        )
+    )
+
+    assert result is None
+    assert repository.failures == ["pipeline_marked_failed"]
+
+
+def test_load_conversation_history_rejects_non_boolean_include_failed():
+    pipeline = definition(
+        step(
+            "start",
+            action="load_conversation_history",
+            config={"limit": 1, "max_characters": 10, "include_failed": "no", "format": "dialog"},
+        )
+    )
+
+    with pytest.raises(PipelineDefinitionError, match="include_failed"):
+        PipelineValidator(default_action_registry()).validate(pipeline)

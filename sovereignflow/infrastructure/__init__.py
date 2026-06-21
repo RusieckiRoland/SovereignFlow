@@ -3,6 +3,7 @@ from .access_policies import (
     PostgreSQLSecurityDecisionAudit,
 )
 from .audit import PostgreSQLExecutionAudit
+from .conversations import PostgreSQLConversationHistory
 from .dataset_reader import JsonlDatasetReader, RelationshipScope
 from .graph import PostgreSQLGraphTraversal
 from .http_gateways import (
@@ -36,6 +37,7 @@ __all__ = [
     "OpenAIEmbeddingGateway",
     "OpenAIModelGateway",
     "PostgreSQLAccessPolicyRepository",
+    "PostgreSQLConversationHistory",
     "PostgreSQLExecutionAudit",
     "PostgreSQLGraphTraversal",
     "PostgreSQLHealthProbe",

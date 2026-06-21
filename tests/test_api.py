@@ -81,6 +81,28 @@ def test_liveness_readiness_and_query_contract(domain_profile, search_hit) -> No
     assert body["request_id"] == "request-1"
     assert body["answer"].startswith("API answer.")
     assert body["citations"][0]["score_type"] == "hybrid"
+    invalid_conversation = client.post(
+        "/v1/query",
+        headers={"X-Request-ID": "request-2", "Authorization": "Bearer token"},
+        json={
+            "query": "question",
+            "domain": "general",
+            "session_id": "session-1",
+            "conversation_id": "",
+        },
+    )
+    accepted_conversation = client.post(
+        "/v1/query",
+        headers={"X-Request-ID": "request-3", "Authorization": "Bearer token"},
+        json={
+            "query": "question",
+            "domain": "general",
+            "session_id": "session-1",
+            "conversation_id": " conversation-1 ",
+        },
+    )
+    assert invalid_conversation.status_code == 400
+    assert accepted_conversation.status_code == 200
 
 
 def test_optional_web_client_exposes_oidc_console_and_security_headers(

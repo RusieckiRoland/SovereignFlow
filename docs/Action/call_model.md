@@ -76,7 +76,8 @@ The contract follows the useful parts of LocalAI-RAG:
 | `temperature` | number | Sampling temperature. |
 | `top_p` | number | Nucleus sampling value. |
 | `server_name` / `model_profile` | string | Future explicit model route, if supported by policy. |
-| `use_history` | boolean | Future option to include conversation history from an explicit source. |
+| `use_history` | boolean | Enables explicit conversation-history input. Defaults to `false`. |
+| `history_source` | string | Must be `conversation_history` when `use_history=true`. |
 
 If an optional model parameter is omitted, `call_model` must not override the
 model gateway default.
@@ -134,9 +135,37 @@ Initial SovereignFlow sources should be explicit and small:
 | `context_chunk_ids` | IDs of chunks included in context. |
 | `citations_text` | Safe citation summary. |
 | `retrieval_trace_summary` | Safe retrieval trace summary, if diagnostics allow it. |
+| `conversation_history` | Prior finalized turns loaded by `load_conversation_history`. |
 
 Do not allow arbitrary `getattr`, private attributes, tenant/security fields, or
 raw authorization objects as `user_parts` sources.
+
+## Conversation History
+
+Conversation history is never included implicitly.
+
+To include it, the pipeline must:
+
+1. run `resolve_conversation`;
+2. run `start_conversation_turn`;
+3. run `load_conversation_history`;
+4. set `use_history: true`;
+5. set `history_source: conversation_history`;
+6. include a `user_parts` item whose source is `conversation_history`.
+
+Example:
+
+```yaml
+use_history: true
+history_source: conversation_history
+user_parts:
+  conversation_history:
+    source: conversation_history
+    template: "### Conversation history, not evidence:\n{}\n\n"
+```
+
+History is not evidence and must not be used as a citation source. Evidence must
+continue to come from retrieval and graph expansion.
 
 ## State Inputs
 
@@ -190,6 +219,8 @@ The action must fail with a controlled error when:
 - user input can appear only inside `user_parts` values;
 - user input cannot choose prompt file, model profile, tenant, ACL, or policy;
 - external-model transmission policy must already have allowed this call;
+- conversation history can be sent only when explicitly configured;
+- conversation history must be labeled as history, not source evidence;
 - diagnostics must not leak restricted context unless explicitly permitted.
 
 `call_model` must not ask the model whether data is allowed. That decision is a

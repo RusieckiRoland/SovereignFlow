@@ -45,6 +45,33 @@
       </section>
 
       <section class="workspace">
+        <section class="card history-card">
+          <h2>Conversation history</h2>
+          <div class="history-actions">
+            <button id="new-conversation" type="button" class="secondary" disabled>
+              New conversation
+            </button>
+            <button id="delete-conversation" type="button" class="secondary" disabled>
+              Delete
+            </button>
+          </div>
+          <label>
+            Active conversation
+            <select id="conversation-list" disabled></select>
+          </label>
+          <label>
+            Title
+            <input id="conversation-title" type="text" disabled>
+          </label>
+          <button id="rename-conversation" type="button" class="secondary" disabled>
+            Rename
+          </button>
+          <p id="conversation-status" class="request-status" aria-live="polite"></p>
+          <div id="turns" class="turns">
+            <p class="empty-history">No conversation selected.</p>
+          </div>
+        </section>
+
         <form id="query-form" class="card query-card">
           <h2>Run a RAG query</h2>
           <label>

@@ -2,15 +2,15 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-sovereignflow}
-      POSTGRES_USER: ${POSTGRES_USER:-sovereignflow}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      POSTGRES_DB: sovereignflow
+      POSTGRES_USER: sovereignflow
+      POSTGRES_PASSWORD: ${SF_POSTGRES_PASSWORD:?SF_POSTGRES_PASSWORD is required}
     ports:
       - "127.0.0.1:${SOVEREIGNFLOW_POSTGRES_PORT:-15432}:5432"
     volumes:
       - sovereignflow_postgres:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sovereignflow}"]
+      test: ["CMD-SHELL", "pg_isready -U sovereignflow"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -22,7 +22,7 @@ services:
       QUERY_DEFAULTS_LIMIT: "25"
       AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: "false"
       AUTHENTICATION_APIKEY_ENABLED: "true"
-      AUTHENTICATION_APIKEY_ALLOWED_KEYS: ${WEAVIATE_API_KEY:?WEAVIATE_API_KEY is required}
+      AUTHENTICATION_APIKEY_ALLOWED_KEYS: ${SF_WEAVIATE_API_KEY:?SF_WEAVIATE_API_KEY is required}
       AUTHENTICATION_APIKEY_USERS: sovereignflow
       AUTHORIZATION_ADMINLIST_ENABLED: "true"
       AUTHORIZATION_ADMINLIST_USERS: sovereignflow
@@ -39,12 +39,14 @@ services:
     image: quay.io/keycloak/keycloak:26.1
     profiles: ["identity"]
     environment:
-      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
-      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-change-me}
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${SF_KEYCLOAK_ADMIN_PASSWORD:?SF_KEYCLOAK_ADMIN_PASSWORD is required}
       KC_DB: dev-file
       KC_HTTP_ENABLED: "true"
       KC_HEALTH_ENABLED: "true"
       KC_METRICS_ENABLED: "true"
+      KC_PROXY_HEADERS: xforwarded
+      KC_HOSTNAME: https://auth.taricai.com
     command:
       - start-dev
       - --import-realm

@@ -2,6 +2,7 @@ const storageKeys = {
   verifier: "sovereignflow.pkce.verifier",
   state: "sovereignflow.oidc.state",
   tokens: "sovereignflow.oidc.tokens",
+  activeConversation: "sovereignflow.activeConversation",
 };
 
 const elements = {
@@ -18,6 +19,13 @@ const elements = {
   query: document.querySelector("#query"),
   diagnostics: document.querySelector("#diagnostics"),
   submit: document.querySelector("#submit-query"),
+  newConversation: document.querySelector("#new-conversation"),
+  deleteConversation: document.querySelector("#delete-conversation"),
+  conversationList: document.querySelector("#conversation-list"),
+  conversationTitle: document.querySelector("#conversation-title"),
+  renameConversation: document.querySelector("#rename-conversation"),
+  conversationStatus: document.querySelector("#conversation-status"),
+  turns: document.querySelector("#turns"),
   requestStatus: document.querySelector("#request-status"),
   requestId: document.querySelector("#request-id"),
   emptyResult: document.querySelector("#empty-result"),
@@ -32,6 +40,8 @@ const elements = {
 let configuration;
 let tokens;
 let capabilities = [];
+let conversations = [];
+let activeConversationId = sessionStorage.getItem(storageKeys.activeConversation) || "";
 
 function randomBase64Url(byteLength) {
   const bytes = new Uint8Array(byteLength);
@@ -80,6 +90,9 @@ function clearSession() {
   sessionStorage.removeItem(storageKeys.tokens);
   sessionStorage.removeItem(storageKeys.verifier);
   sessionStorage.removeItem(storageKeys.state);
+  sessionStorage.removeItem(storageKeys.activeConversation);
+  conversations = [];
+  activeConversationId = "";
 }
 
 function tokenIsCurrent(accessToken) {
@@ -183,6 +196,31 @@ function setQueryEnabled(enabled) {
   elements.query.disabled = !enabled;
   elements.diagnostics.disabled = !enabled;
   elements.submit.disabled = !enabled;
+  setConversationControlsEnabled(enabled);
+}
+
+function setConversationControlsEnabled(enabled) {
+  elements.newConversation.disabled = !enabled;
+  elements.conversationList.disabled = !enabled || conversations.length === 0;
+  elements.conversationTitle.disabled = !enabled || !activeConversationId;
+  elements.renameConversation.disabled = !enabled || !activeConversationId;
+  elements.deleteConversation.disabled = !enabled || !activeConversationId;
+}
+
+async function apiRequest(path, options = {}) {
+  const accessToken = await currentAccessToken();
+  const headers = {
+    Authorization: `Bearer ${accessToken}`,
+    ...(options.body ? { "Content-Type": "application/json" } : {}),
+    ...(options.headers || {}),
+  };
+  const response = await fetch(path, { ...options, headers, cache: "no-store" });
+  const payload = await response.json();
+  if (!response.ok) {
+    const message = payload.error && payload.error.message;
+    throw new Error(message || `Request failed with HTTP ${response.status}.`);
+  }
+  return payload;
 }
 
 async function loadCatalog() {
@@ -231,7 +269,119 @@ async function renderSession() {
     "Not provided";
   setQueryEnabled(false);
   await loadCatalog();
+  await loadConversations();
   setQueryEnabled(capabilities.length > 0);
+}
+
+async function loadConversations() {
+  const payload = await apiRequest("/v1/conversations?limit=50");
+  conversations = payload.conversations || [];
+  if (activeConversationId && !conversations.some(item => item.conversation_id === activeConversationId)) {
+    activeConversationId = "";
+    sessionStorage.removeItem(storageKeys.activeConversation);
+  }
+  if (!activeConversationId && conversations.length) {
+    activeConversationId = conversations[0].conversation_id;
+    sessionStorage.setItem(storageKeys.activeConversation, activeConversationId);
+  }
+  renderConversations();
+  if (activeConversationId) {
+    await loadTurns(activeConversationId);
+  } else {
+    renderTurns([]);
+  }
+}
+
+function renderConversations() {
+  elements.conversationList.replaceChildren(
+    ...conversations.map(conversation => {
+      const option = document.createElement("option");
+      option.value = conversation.conversation_id;
+      option.textContent = conversation.title;
+      return option;
+    }),
+  );
+  elements.conversationList.value = activeConversationId;
+  const active = conversations.find(item => item.conversation_id === activeConversationId);
+  elements.conversationTitle.value = active ? active.title : "";
+  setConversationControlsEnabled(Boolean(tokens && tokens.access_token && capabilities.length));
+}
+
+async function loadTurns(conversationId) {
+  const payload = await apiRequest(`/v1/conversations/${conversationId}/turns?limit=50`);
+  renderTurns(payload.turns || []);
+}
+
+function renderTurns(turns) {
+  elements.turns.replaceChildren();
+  if (!turns.length) {
+    const empty = document.createElement("p");
+    empty.className = "empty-history";
+    empty.textContent = activeConversationId ? "No turns in this conversation yet." : "No conversation selected.";
+    elements.turns.append(empty);
+    return;
+  }
+  for (const turn of turns) {
+    const card = document.createElement("article");
+    card.className = "turn";
+    const meta = document.createElement("div");
+    meta.className = "turn-meta";
+    meta.textContent = `#${turn.sequence_number} · ${turn.status} · ${turn.turn_id}`;
+    const question = document.createElement("div");
+    question.className = "turn-question";
+    question.textContent = `User: ${turn.question_text || turn.question || ""}`;
+    const answer = document.createElement("div");
+    answer.className = "turn-answer";
+    answer.textContent = `Assistant: ${turn.answer_text || turn.answer || ""}`;
+    card.append(meta, question, answer);
+    elements.turns.append(card);
+  }
+}
+
+async function createConversation() {
+  const title = elements.query.value.trim().slice(0, 80) || "New conversation";
+  const payload = await apiRequest("/v1/conversations", {
+    method: "POST",
+    body: JSON.stringify({
+      session_id: crypto.randomUUID(),
+      domain: selectedCapabilityDomain(),
+      title,
+    }),
+  });
+  activeConversationId = payload.conversation.conversation_id;
+  sessionStorage.setItem(storageKeys.activeConversation, activeConversationId);
+  await loadConversations();
+  return activeConversationId;
+}
+
+async function renameConversation() {
+  if (!activeConversationId) {
+    return;
+  }
+  elements.conversationStatus.textContent = "Renaming conversation…";
+  await apiRequest(`/v1/conversations/${activeConversationId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ title: elements.conversationTitle.value }),
+  });
+  await loadConversations();
+  elements.conversationStatus.textContent = "Conversation renamed.";
+}
+
+async function deleteConversation() {
+  if (!activeConversationId) {
+    return;
+  }
+  elements.conversationStatus.textContent = "Deleting conversation…";
+  await apiRequest(`/v1/conversations/${activeConversationId}`, { method: "DELETE" });
+  activeConversationId = "";
+  sessionStorage.removeItem(storageKeys.activeConversation);
+  await loadConversations();
+  elements.conversationStatus.textContent = "Conversation deleted.";
+}
+
+function selectedCapabilityDomain() {
+  const selected = capabilities.find(capability => capability.capability_id === elements.domain.value);
+  return selected ? selected.domain : "general";
 }
 
 function renderCitations(citations) {
@@ -271,6 +421,9 @@ async function runQuery(event) {
   elements.requestStatus.textContent = "Running query…";
   elements.submit.disabled = true;
   try {
+    if (!activeConversationId) {
+      await createConversation();
+    }
     const accessToken = await currentAccessToken();
     const headers = {
       Authorization: `Bearer ${accessToken}`,
@@ -287,6 +440,7 @@ async function runQuery(event) {
         capability_id: elements.domain.value,
         query: elements.query.value,
         session_id: crypto.randomUUID(),
+        conversation_id: activeConversationId,
         filters: {},
       }),
     });
@@ -296,6 +450,11 @@ async function runQuery(event) {
       throw new Error(message || `Request failed with HTTP ${response.status}.`);
     }
     renderResult(payload);
+    if (payload.conversation_id) {
+      activeConversationId = payload.conversation_id;
+      sessionStorage.setItem(storageKeys.activeConversation, activeConversationId);
+      await loadConversations();
+    }
     elements.requestStatus.textContent = "Query completed.";
   } catch (error) {
     elements.requestStatus.textContent = error.message;
@@ -325,5 +484,34 @@ async function initialize() {
 elements.signIn.addEventListener("click", startLogin);
 elements.signOut.addEventListener("click", signOut);
 elements.form.addEventListener("submit", runQuery);
+elements.newConversation.addEventListener("click", async () => {
+  try {
+    elements.conversationStatus.textContent = "Creating conversation…";
+    await createConversation();
+    elements.conversationStatus.textContent = "Conversation created.";
+  } catch (error) {
+    elements.conversationStatus.textContent = error.message;
+  }
+});
+elements.conversationList.addEventListener("change", async () => {
+  activeConversationId = elements.conversationList.value;
+  sessionStorage.setItem(storageKeys.activeConversation, activeConversationId);
+  renderConversations();
+  await loadTurns(activeConversationId);
+});
+elements.renameConversation.addEventListener("click", async () => {
+  try {
+    await renameConversation();
+  } catch (error) {
+    elements.conversationStatus.textContent = error.message;
+  }
+});
+elements.deleteConversation.addEventListener("click", async () => {
+  try {
+    await deleteConversation();
+  } catch (error) {
+    elements.conversationStatus.textContent = error.message;
+  }
+});
 
 initialize();

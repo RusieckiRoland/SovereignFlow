@@ -13,6 +13,7 @@ from werkzeug.exceptions import HTTPException
 
 from sovereignflow.application import (
     AuthenticationPort,
+    ConversationHistoryService,
     HealthProbe,
     OperationsService,
     PipelineAuthorizationService,
@@ -85,6 +86,7 @@ class QueryDispatcher:
                 authorization=command.authorization,
                 filters=command.filters,
                 diagnostics_requested=command.diagnostics_requested,
+                conversation_id=command.conversation_id,
             )
         if service is None:
             raise DomainNotFoundError("The requested capability is not available")
@@ -107,6 +109,7 @@ def create_app(
     authenticator: AuthenticationPort,
     web_client: WebClientConfiguration | None = None,
     policy_administration: PolicyAdministrationService | None = None,
+    conversation_history: ConversationHistoryService | None = None,
 ) -> Flask:
     app = Flask(__name__)
     probes = tuple(readiness_probes)
@@ -231,6 +234,7 @@ def create_app(
                 diagnostics_requested=(
                     str(request.headers.get("X-SovereignFlow-Diagnostics") or "").lower() == "true"
                 ),
+                conversation_id=_optional_payload_string(payload, "conversation_id"),
             ),
             capability_id=(
                 str(payload.get("capability_id") or "") if dispatcher.requires_capability else None
@@ -254,6 +258,8 @@ def create_app(
                 for citation in result.citations
             ],
             "pipeline_trace": list(result.pipeline_trace),
+            "conversation_id": result.conversation_id,
+            "turn_id": result.turn_id,
         }
         if (
             result.diagnostics is not None
@@ -291,6 +297,91 @@ def create_app(
                 ],
             }
         )
+
+    if conversation_history is not None:
+
+        @app.post("/v1/conversations")
+        def create_conversation() -> Any:
+            payload = request.get_json(silent=True)
+            if not isinstance(payload, dict):
+                raise ValidationError("Request body must be a JSON object")
+            forbidden_security_fields = {
+                "tenant_id",
+                "subject",
+                "subject_hash",
+                "acl_labels",
+                "security",
+                "roles",
+                "groups",
+            }.intersection(payload)
+            if forbidden_security_fields:
+                raise ValidationError(
+                    "Security context cannot be supplied in request body: "
+                    + ", ".join(sorted(forbidden_security_fields))
+                )
+            conversation = conversation_history.create(
+                authenticate_query(),
+                session_id=str(payload.get("session_id") or ""),
+                domain=str(payload.get("domain") or ""),
+                title=str(payload.get("title") or ""),
+            )
+            return jsonify({"ok": True, "conversation": _serialize_conversation(conversation)}), 201
+
+        @app.get("/v1/conversations")
+        def list_conversations() -> Any:
+            return jsonify(
+                {
+                    "ok": True,
+                    "conversations": [
+                        _serialize_conversation(conversation)
+                        for conversation in conversation_history.list(
+                            authenticate_query(),
+                            limit=_positive_query_integer("limit", default=50),
+                        )
+                    ],
+                }
+            )
+
+        @app.get("/v1/conversations/<conversation_id>")
+        def get_conversation(conversation_id: str) -> Any:
+            history = conversation_history.get(
+                authenticate_query(),
+                conversation_id=conversation_id,
+                turn_limit=_positive_query_integer("turn_limit", default=50),
+            )
+            return jsonify(
+                {
+                    "ok": True,
+                    "conversation": _serialize_conversation(history.conversation),
+                    "turns": [_serialize_turn(turn) for turn in history.turns],
+                }
+            )
+
+        @app.patch("/v1/conversations/<conversation_id>")
+        def rename_conversation(conversation_id: str) -> Any:
+            payload = request.get_json(silent=True)
+            if not isinstance(payload, dict):
+                raise ValidationError("Request body must be a JSON object")
+            conversation = conversation_history.rename(
+                authenticate_query(),
+                conversation_id=conversation_id,
+                title=str(payload.get("title") or ""),
+            )
+            return jsonify({"ok": True, "conversation": _serialize_conversation(conversation)})
+
+        @app.delete("/v1/conversations/<conversation_id>")
+        def delete_conversation(conversation_id: str) -> Any:
+            conversation_history.delete(authenticate_query(), conversation_id=conversation_id)
+            return jsonify({"ok": True})
+
+        @app.get("/v1/conversations/<conversation_id>/turns")
+        def list_conversation_turns(conversation_id: str) -> Any:
+            history = conversation_history.get(
+                authenticate_query(),
+                conversation_id=conversation_id,
+                turn_limit=_positive_query_integer("limit", default=50),
+            )
+            return jsonify({"ok": True, "turns": [_serialize_turn(turn) for turn in history.turns]})
 
     if policy_administration is not None:
 
@@ -538,6 +629,59 @@ def _serialize_retrieval_trace(diagnostics) -> dict[str, Any]:
             }
         ),
     }
+
+
+def _serialize_conversation(conversation) -> dict[str, Any]:
+    return {
+        "conversation_id": conversation.conversation_id,
+        "session_id": conversation.session_id,
+        "domain": conversation.domain,
+        "title": conversation.title,
+        "status": conversation.status.value,
+        "created_at": conversation.created_at,
+        "updated_at": conversation.updated_at,
+        "deleted_at": conversation.deleted_at,
+    }
+
+
+def _serialize_turn(turn) -> dict[str, Any]:
+    return {
+        "turn_id": turn.turn_id,
+        "conversation_id": turn.conversation_id,
+        "request_id": turn.request_id,
+        "sequence_number": turn.sequence_number,
+        "question": turn.question_text,
+        "answer": turn.answer_text,
+        "question_text": turn.question_text,
+        "answer_text": turn.answer_text,
+        "status": turn.status.value,
+        "created_at": turn.created_at,
+        "finalized_at": turn.finalized_at,
+        "error_code": turn.error_code,
+        "metadata": dict(turn.metadata),
+    }
+
+
+def _positive_query_integer(name: str, *, default: int) -> int:
+    raw_value = request.args.get(name)
+    if raw_value is None:
+        return default
+    try:
+        value = int(raw_value)
+    except ValueError as exc:
+        raise ValidationError(f"{name} must be a positive integer") from exc
+    if value < 1:
+        raise ValidationError(f"{name} must be a positive integer")
+    return value
+
+
+def _optional_payload_string(payload: Mapping[str, Any], field: str) -> str | None:
+    value = payload.get(field)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ValidationError(f"{field} must be a non-empty string")
+    return value.strip()
 
 
 def _parse_policy_bundle(

@@ -120,6 +120,10 @@ class GraphTraversal(IngestionRepository):
     name = "graph_traversal"
 
 
+class ConversationHistory(IngestionRepository):
+    name = "conversation_history"
+
+
 class AccessPolicies(IngestionRepository):
     name = "access_policies"
 
@@ -256,6 +260,10 @@ def test_bootstrap_builds_and_validates_complete_application(monkeypatch, tmp_pa
         GraphTraversal,
     )
     monkeypatch.setattr(
+        "sovereignflow.bootstrap.application.PostgreSQLConversationHistory",
+        ConversationHistory,
+    )
+    monkeypatch.setattr(
         "sovereignflow.bootstrap.application.PostgreSQLAccessPolicyRepository",
         AccessPolicies,
     )
@@ -347,6 +355,10 @@ def test_bootstrap_closes_client_when_construction_fails(monkeypatch, tmp_path) 
     monkeypatch.setattr(
         "sovereignflow.bootstrap.application.PostgreSQLGraphTraversal",
         GraphTraversal,
+    )
+    monkeypatch.setattr(
+        "sovereignflow.bootstrap.application.PostgreSQLConversationHistory",
+        ConversationHistory,
     )
     monkeypatch.setattr(
         "sovereignflow.bootstrap.application.PostgreSQLAccessPolicyRepository",

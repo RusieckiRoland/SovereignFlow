@@ -13,4 +13,5 @@ build/
 log/
 storage/
 models/
-docs/pl/
+.env.dev
+.claude/

@@ -997,6 +997,7 @@ class QueryCommand:
     authorization: AuthorizationContext
     filters: Mapping[str, Any] = field(default_factory=dict)
     diagnostics_requested: bool = False
+    conversation_id: str | None = None
 
     def __post_init__(self) -> None:
         for field_name in ("request_id", "query", "domain", "session_id"):
@@ -1004,6 +1005,12 @@ class QueryCommand:
                 self,
                 field_name,
                 _required(getattr(self, field_name), f"QueryCommand.{field_name}"),
+            )
+        if self.conversation_id is not None:
+            object.__setattr__(
+                self,
+                "conversation_id",
+                _required(self.conversation_id, "QueryCommand.conversation_id"),
             )
         object.__setattr__(self, "filters", _immutable_mapping(self.filters))
 
@@ -1017,6 +1024,8 @@ class QueryResult:
     citations: tuple[Citation, ...]
     pipeline_trace: tuple[str, ...]
     diagnostics: QueryDiagnostics | None = None
+    conversation_id: str | None = None
+    turn_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1221,6 +1230,134 @@ class DatasetImportStatus(StrEnum):
     DELETING = "deleting"
     COMPLETED = "completed"
     FAILED = "failed"
+
+
+class ConversationStatus(StrEnum):
+    ACTIVE = "active"
+    DELETED = "deleted"
+
+
+class ConversationTurnStatus(StrEnum):
+    STARTED = "started"
+    FINALIZED = "finalized"
+    FAILED = "failed"
+    DISCARDED = "discarded"
+
+
+@dataclass(frozen=True)
+class Conversation:
+    conversation_id: str
+    tenant_id: str
+    subject_hash: str
+    session_id: str
+    domain: str
+    title: str
+    status: ConversationStatus
+    created_at: str
+    updated_at: str
+    deleted_at: str | None = None
+
+    def __post_init__(self) -> None:
+        for field_name in (
+            "conversation_id",
+            "tenant_id",
+            "subject_hash",
+            "session_id",
+            "domain",
+            "title",
+            "created_at",
+            "updated_at",
+        ):
+            object.__setattr__(
+                self,
+                field_name,
+                _required(getattr(self, field_name), f"Conversation.{field_name}"),
+            )
+        if self.deleted_at is not None:
+            object.__setattr__(
+                self,
+                "deleted_at",
+                _required(self.deleted_at, "Conversation.deleted_at"),
+            )
+        if self.status == ConversationStatus.ACTIVE and self.deleted_at is not None:
+            raise ValidationError("Active conversation cannot define deleted_at")
+        if self.status == ConversationStatus.DELETED and self.deleted_at is None:
+            raise ValidationError("Deleted conversation requires deleted_at")
+
+
+@dataclass(frozen=True)
+class ConversationTurn:
+    turn_id: str
+    conversation_id: str
+    request_id: str
+    sequence_number: int
+    question_text: str
+    status: ConversationTurnStatus
+    created_at: str
+    answer_text: str | None = None
+    finalized_at: str | None = None
+    error_code: str | None = None
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        for field_name in (
+            "turn_id",
+            "conversation_id",
+            "request_id",
+            "question_text",
+            "created_at",
+        ):
+            object.__setattr__(
+                self,
+                field_name,
+                _required(getattr(self, field_name), f"ConversationTurn.{field_name}"),
+            )
+        if self.sequence_number < 1:
+            raise ValidationError("ConversationTurn.sequence_number must be positive")
+        if self.answer_text is not None:
+            object.__setattr__(
+                self,
+                "answer_text",
+                _required(self.answer_text, "ConversationTurn.answer_text"),
+            )
+        if self.finalized_at is not None:
+            object.__setattr__(
+                self,
+                "finalized_at",
+                _required(self.finalized_at, "ConversationTurn.finalized_at"),
+            )
+        if self.error_code is not None:
+            object.__setattr__(
+                self,
+                "error_code",
+                _required(self.error_code, "ConversationTurn.error_code"),
+            )
+        if self.status == ConversationTurnStatus.STARTED:
+            if self.answer_text is not None or self.finalized_at is not None:
+                raise ValidationError("Started conversation turn cannot be finalized")
+            if self.error_code is not None:
+                raise ValidationError("Started conversation turn cannot define error_code")
+        if self.status == ConversationTurnStatus.FINALIZED:
+            if self.answer_text is None or self.finalized_at is None:
+                raise ValidationError(
+                    "Finalized conversation turn requires answer and finalized_at"
+                )
+            if self.error_code is not None:
+                raise ValidationError("Finalized conversation turn cannot define error_code")
+        if self.status in {ConversationTurnStatus.FAILED, ConversationTurnStatus.DISCARDED}:
+            if self.answer_text is not None:
+                raise ValidationError("Unsuccessful conversation turn cannot define answer")
+            if self.finalized_at is None:
+                raise ValidationError("Unsuccessful conversation turn requires finalized_at")
+        if self.status == ConversationTurnStatus.FAILED and self.error_code is None:
+            raise ValidationError("Failed conversation turn requires error_code")
+        object.__setattr__(self, "metadata", _immutable_mapping(self.metadata))
+
+
+@dataclass(frozen=True)
+class ConversationHistory:
+    conversation: Conversation
+    turns: tuple[ConversationTurn, ...]
 
 
 @dataclass(frozen=True)

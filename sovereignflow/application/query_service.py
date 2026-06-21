@@ -12,7 +12,7 @@ from sovereignflow.domain import (
 )
 
 from .pipeline import ModelServerRuntime, PipelineContext, PipelineEngine
-from .ports import GraphTraversalPort, PromptRepositoryPort, RetrievalPort
+from .ports import ConversationHistoryPort, GraphTraversalPort, PromptRepositoryPort, RetrievalPort
 
 
 class RagQueryService:
@@ -26,6 +26,7 @@ class RagQueryService:
         prompts: PromptRepositoryPort,
         pipeline: PipelineDefinition,
         engine: PipelineEngine,
+        conversation_history: ConversationHistoryPort | None = None,
     ) -> None:
         if not model_servers:
             raise PolicyViolationError("At least one model server must be configured")
@@ -36,6 +37,7 @@ class RagQueryService:
         self._prompts = prompts
         self._pipeline = pipeline
         self._engine = engine
+        self._conversation_history = conversation_history
 
     @property
     def domain_name(self) -> str:
@@ -65,6 +67,7 @@ class RagQueryService:
                 retrieval=self._retrieval,
                 graph=self._graph,
                 model=initial_model,
+                conversation_history=self._conversation_history,
                 model_servers=self._model_servers,
                 prompts=self._prompts,
             ),

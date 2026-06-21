@@ -7,6 +7,8 @@ from sovereignflow.domain import (
     AccessPolicyBundle,
     AuthorizationContext,
     CapabilityDescriptor,
+    Conversation,
+    ConversationTurn,
     DatasetImportRequest,
     DatasetImportRun,
     DatasetImportStatus,
@@ -137,6 +139,85 @@ class ExecutionAuditPort(Protocol):
     def fetch(self, request_id: str, *, tenant_id: str) -> dict | None: ...
 
     def metrics(self, *, tenant_id: str, hours: int) -> dict: ...
+
+
+class ConversationHistoryPort(Protocol):
+    def create_conversation(self, conversation: Conversation) -> Conversation: ...
+
+    def list_conversations(
+        self,
+        *,
+        tenant_id: str,
+        subject_hash: str,
+        limit: int,
+    ) -> Sequence[Conversation]: ...
+
+    def get_conversation(
+        self,
+        *,
+        conversation_id: str,
+        tenant_id: str,
+        subject_hash: str,
+    ) -> Conversation | None: ...
+
+    def rename_conversation(
+        self,
+        *,
+        conversation_id: str,
+        tenant_id: str,
+        subject_hash: str,
+        title: str,
+    ) -> Conversation | None: ...
+
+    def delete_conversation(
+        self,
+        *,
+        conversation_id: str,
+        tenant_id: str,
+        subject_hash: str,
+    ) -> bool: ...
+
+    def start_turn(self, turn: ConversationTurn) -> ConversationTurn: ...
+
+    def finalize_turn(
+        self,
+        *,
+        conversation_id: str,
+        turn_id: str,
+        tenant_id: str,
+        subject_hash: str,
+        answer_text: str,
+        metadata: Mapping[str, Any],
+    ) -> ConversationTurn | None: ...
+
+    def fail_turn(
+        self,
+        *,
+        conversation_id: str,
+        turn_id: str,
+        tenant_id: str,
+        subject_hash: str,
+        error_code: str,
+        metadata: Mapping[str, Any],
+    ) -> ConversationTurn | None: ...
+
+    def list_turns(
+        self,
+        *,
+        conversation_id: str,
+        tenant_id: str,
+        subject_hash: str,
+        limit: int,
+    ) -> Sequence[ConversationTurn]: ...
+
+    def recent_finalized_turns(
+        self,
+        *,
+        conversation_id: str,
+        tenant_id: str,
+        subject_hash: str,
+        limit: int,
+    ) -> Sequence[ConversationTurn]: ...
 
 
 class IngestionRepositoryPort(Protocol):

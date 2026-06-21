@@ -49,13 +49,27 @@ def test_application_has_no_infrastructure_or_interface_dependencies() -> None:
         "sovereignflow.interfaces",
         "sovereignflow.bootstrap",
     }
-    for path in (ROOT / "application").glob("*.py"):
+    for path in (ROOT / "application").rglob("*.py"):
         imports = imported_modules(path)
         assert not any(
             module == item or module.startswith(f"{item}.")
             for module in imports
             for item in forbidden
         ), path
+
+
+def test_each_action_lives_in_its_own_module() -> None:
+    actions_root = ROOT / "application" / "actions"
+    for path in actions_root.glob("*.py"):
+        if path.name.startswith("_"):
+            continue
+        imports = imported_modules(path)
+        other_action_modules = {
+            f"sovereignflow.application.actions.{p.stem}"
+            for p in actions_root.glob("*.py")
+            if p != path and not p.name.startswith("_")
+        }
+        assert not imports.intersection(other_action_modules), path
 
 
 def test_core_contains_no_code_analysis_vocabulary() -> None:

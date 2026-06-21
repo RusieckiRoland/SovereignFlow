@@ -255,6 +255,7 @@ def build_query_service(
     graph: StubGraph | None = None,
     audit: StubAudit | None = None,
     pipeline: PipelineDefinition | None = None,
+    conversation_history=None,
 ) -> RagQueryService:
     selected_audit = audit or StubAudit()
     return RagQueryService(
@@ -272,6 +273,7 @@ def build_query_service(
         ),
         prompts=prompts,
         pipeline=pipeline or default_pipeline(),
+        conversation_history=conversation_history,
         engine=PipelineEngine(
             registry=default_action_registry(),
             audit=selected_audit,

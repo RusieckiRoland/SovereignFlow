@@ -146,15 +146,17 @@
       "fullScopeAllowed": true,
       "redirectUris": [
         "http://127.0.0.1:8000/app/",
-        "http://localhost:8000/app/"
+        "http://localhost:8000/app/",
+        "https://app.taricai.com/app/"
       ],
       "webOrigins": [
         "http://127.0.0.1:8000",
-        "http://localhost:8000"
+        "http://localhost:8000",
+        "https://app.taricai.com"
       ],
       "attributes": {
         "pkce.code.challenge.method": "S256",
-        "post.logout.redirect.uris": "http://127.0.0.1:8000/app/##http://localhost:8000/app/"
+        "post.logout.redirect.uris": "http://127.0.0.1:8000/app/##http://localhost:8000/app/##https://app.taricai.com/app/"
       },
       "protocolMappers": [
         {

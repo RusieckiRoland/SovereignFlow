@@ -1,0 +1,84 @@
+pipeline:
+  name: conversation-rag
+  entry_step: normalize_query
+  behavior_version: "1.0"
+  max_steps: 10
+  steps:
+    - id: normalize_query
+      action: normalize_query
+      action_version: "1.0"
+      next: resolve_conversation
+
+    - id: resolve_conversation
+      action: resolve_conversation
+      action_version: "1.0"
+      conversation_id_source: request
+      create_if_missing: true
+      title_source: query
+      next: start_turn
+
+    - id: start_turn
+      action: start_conversation_turn
+      action_version: "1.0"
+      next: load_history
+
+    - id: load_history
+      action: load_conversation_history
+      action_version: "1.0"
+      limit: 10
+      max_characters: 4000
+      include_failed: false
+      format: dialog
+      next: retrieve
+
+    - id: retrieve
+      action: retrieve
+      action_version: "1.0"
+      query_source: normalized_query
+      search_mode: hybrid
+      top_k: 3
+      filters: {}
+      next: manage_context_budget
+
+    - id: manage_context_budget
+      action: manage_context_budget
+      action_version: "1.0"
+      source: hits
+      target: evidence
+      max_context_characters: 500
+      next: enforce_model_transmission_policy
+
+    - id: enforce_model_transmission_policy
+      action: enforce_model_transmission_policy
+      action_version: "2.0"
+      selected_model_server_id: default-model
+      external_transmission: allowed
+      next: call_model
+
+    - id: call_model
+      action: call_model
+      action_version: "1.0"
+      prompt_key: answer
+      use_history: true
+      history_source: conversation_history
+      user_parts:
+        conversation_history:
+          source: conversation_history
+          template: "CONVERSATION HISTORY\n{}\n\n"
+        user_question:
+          source: normalized_query
+          template: "USER QUESTION\n{}\n\n"
+        evidence:
+          source: evidence
+          template: "EVIDENCE\n{}\n\n"
+      next: finalize
+
+    - id: finalize
+      action: finalize
+      action_version: "1.0"
+      next: save_turn
+
+    - id: save_turn
+      action: finalize_conversation_turn
+      action_version: "1.0"
+      end: true
