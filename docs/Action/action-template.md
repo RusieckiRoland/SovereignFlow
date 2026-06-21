@@ -6,8 +6,7 @@ Describe what the action does in one or two paragraphs.
 
 ## Domain Neutrality
 
-State whether the action is domain-neutral. If it came from LocalAI-RAG, list
-which code-analysis assumptions were removed or generalized.
+State whether the action is domain-neutral and what assumptions it does not make about the domain.
 
 ## YAML Schema
 

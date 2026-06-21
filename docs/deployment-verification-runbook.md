@@ -1,4 +1,4 @@
-# Stage 3 verification runbook
+# Deployment verification runbook
 
 ## Install development dependencies
 

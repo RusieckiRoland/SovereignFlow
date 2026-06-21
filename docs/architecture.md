@@ -24,9 +24,9 @@ SovereignFlow owns reusable RAG mechanics:
 
 Domain projects own source semantics and business rules.
 
-## Extraction from LocalAI-RAG
+## Design decisions
 
-Retained ideas:
+Retained:
 
 - configurable workflows,
 - explicit runtime dependency injection,
@@ -35,13 +35,11 @@ Retained ideas:
 - security-aware routing,
 - traceable evidence.
 
-Intentionally removed:
+Intentionally excluded:
 
 - repository, branch, and source-code snapshot state,
 - code symbol and dependency-graph actions,
-- Roslyn and SQL/.NET summarizers,
 - code-specific query classification,
-- UML and Enterprise Architect commands,
 - code-oriented prompts and model defaults.
 
 ## Clean Architecture dependency direction

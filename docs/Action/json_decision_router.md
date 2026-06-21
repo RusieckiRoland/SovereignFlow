@@ -2,8 +2,7 @@
 
 `json_decision_router` selects a named route from a strict JSON decision object.
 
-Unlike the original LocalAI-RAG implementation, SovereignFlow does not use
-best-effort parsing or Python literal fallbacks. The model must emit valid JSON.
+SovereignFlow does not use best-effort parsing or Python literal fallbacks. The model must emit valid JSON.
 Invalid JSON follows explicit `on_other` when configured, otherwise execution
 fails.
 

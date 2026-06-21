@@ -4,7 +4,7 @@
 
 SovereignFlow is a domain-neutral foundation for Retrieval-Augmented Generation systems.
 
-It is extracted from the architectural lessons of LocalAI-RAG, but it is not a code-analysis fork. The new core does not know about repositories, branches, source-code languages, Roslyn, SQL objects, UML, or code snapshots.
+It is a domain-neutral core — not a code-analysis tool. It does not know about repositories, branches, source-code languages, SQL objects, UML, or code snapshots.
 
 ## Core principles
 
@@ -487,6 +487,6 @@ The reusable foundation intentionally does not include:
 
 ## Status
 
-Stage 5 is complete. SovereignFlow 1.0 provides the professional domain-neutral foundation extracted from LocalAI-RAG: clean architectural boundaries, versioned pipelines, durable ingestion, Weaviate retrieval, PostgreSQL graph expansion, explicit model and embedding services, execution audit, operational metrics, and authenticated tenant-scoped administration.
+SovereignFlow 1.0 is production-ready. The foundation provides clean architectural boundaries, versioned pipelines, durable ingestion, Weaviate retrieval, PostgreSQL graph expansion, unified `sf` schema, explicit model and embedding services, execution audit, operational metrics, and authenticated tenant-scoped administration.
 
-The next work belongs to domain packages and to optional platform evolution that preserves these public contracts.
+Domain packages extend the platform without modifying the core. The public contracts are stable.

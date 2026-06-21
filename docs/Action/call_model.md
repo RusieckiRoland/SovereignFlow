@@ -28,9 +28,7 @@ evidence means. It only formats already-authorized context into a model request.
 Domain-specific behavior belongs in prompt files and pipeline configuration, not
 inside Python code.
 
-## LocalAI-RAG Source Contract
-
-The contract follows the useful parts of LocalAI-RAG:
+## Contract
 
 - `prompt_key` points to a prompt file;
 - `user_parts` defines how user content is assembled;
