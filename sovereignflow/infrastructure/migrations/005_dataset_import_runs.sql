@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS ingestion.import_runs (
+CREATE TABLE IF NOT EXISTS sf.import_runs (
     import_id TEXT PRIMARY KEY,
     tenant_id TEXT NOT NULL,
     domain TEXT NOT NULL,
@@ -31,4 +31,4 @@ CREATE TABLE IF NOT EXISTS ingestion.import_runs (
 );
 
 CREATE INDEX IF NOT EXISTS ix_import_runs_tenant_updated
-    ON ingestion.import_runs (tenant_id, updated_at DESC);
+    ON sf.import_runs (tenant_id, updated_at DESC);

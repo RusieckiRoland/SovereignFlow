@@ -51,7 +51,7 @@ interfaces -> application -> domain
 infrastructure -> application ports
 bootstrap -> all layers
 
-TaricAI and other domains -> public SovereignFlow contracts
+Domain solutions -> public SovereignFlow contracts
 ```
 
 The domain layer imports no infrastructure framework or SDK. The application layer depends only on domain types and application ports.

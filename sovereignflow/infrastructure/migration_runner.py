@@ -27,9 +27,10 @@ class PostgreSQLMigrationRunner:
             ) as connection:
                 with connection.cursor() as cursor:
                     cursor.execute("SELECT pg_advisory_xact_lock(%s)", (821347129,))
+                    cursor.execute("CREATE SCHEMA IF NOT EXISTS sf")
                     cursor.execute(
                         """
-                        CREATE TABLE IF NOT EXISTS public.sovereignflow_schema_migrations (
+                        CREATE TABLE IF NOT EXISTS sf.schema_migrations (
                             version TEXT PRIMARY KEY,
                             checksum TEXT NOT NULL,
                             applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -42,7 +43,7 @@ class PostgreSQLMigrationRunner:
                         cursor.execute(
                             """
                             SELECT checksum
-                            FROM public.sovereignflow_schema_migrations
+                            FROM sf.schema_migrations
                             WHERE version = %s
                             """,
                             (migration.name,),
@@ -57,7 +58,7 @@ class PostgreSQLMigrationRunner:
                         cursor.execute(sql)
                         cursor.execute(
                             """
-                            INSERT INTO public.sovereignflow_schema_migrations (version, checksum)
+                            INSERT INTO sf.schema_migrations (version, checksum)
                             VALUES (%s, %s)
                             """,
                             (migration.name, checksum),

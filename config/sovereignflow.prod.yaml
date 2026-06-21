@@ -11,9 +11,9 @@ admin:
   api_key_env: SF_ADMIN_API_KEY
 
 identity_provider:
-  issuer: https://auth.taricai.com/realms/sovereignflow
+  issuer: https://<auth-domain>/realms/sovereignflow
   audience: sovereignflow-api
-  jwks_url: https://auth.taricai.com/realms/sovereignflow/protocol/openid-connect/certs
+  jwks_url: https://<auth-domain>/realms/sovereignflow/protocol/openid-connect/certs
   algorithms: [RS256]
   timeout_seconds: 10
   cache_ttl_seconds: 300
@@ -28,9 +28,9 @@ identity_provider:
 
 web_client:
   client_id: sovereignflow-web-client
-  authorization_url: https://auth.taricai.com/realms/sovereignflow/protocol/openid-connect/auth
-  token_url: https://auth.taricai.com/realms/sovereignflow/protocol/openid-connect/token
-  logout_url: https://auth.taricai.com/realms/sovereignflow/protocol/openid-connect/logout
+  authorization_url: https://<auth-domain>/realms/sovereignflow/protocol/openid-connect/auth
+  token_url: https://<auth-domain>/realms/sovereignflow/protocol/openid-connect/token
+  logout_url: https://<auth-domain>/realms/sovereignflow/protocol/openid-connect/logout
 
 model_servers:
   - id: default-model
@@ -62,3 +62,4 @@ pipelines_root: ../pipelines
 domains:
   - domains/general.yaml
   - domains/orders.yaml
+  - domains/regulations.yaml

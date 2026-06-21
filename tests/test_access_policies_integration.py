@@ -69,7 +69,7 @@ def test_postgresql_policies_map_claims_refresh_without_restart_and_audit() -> N
             cursor.execute(
                 """
                 SELECT allowed, reason_code, subject_hash
-                FROM public.sovereignflow_security_decisions
+                FROM sf.security_decisions
                 WHERE request_id IN (%s, %s)
                 ORDER BY request_id
                 """,
@@ -81,11 +81,11 @@ def test_postgresql_policies_map_claims_refresh_without_restart_and_audit() -> N
     finally:
         with psycopg.connect(connection_url) as connection, connection.cursor() as cursor:
             cursor.execute(
-                "DELETE FROM public.sovereignflow_security_decisions WHERE tenant_id = %s",
+                "DELETE FROM sf.security_decisions WHERE tenant_id = %s",
                 (tenant_id,),
             )
             cursor.execute(
-                "DELETE FROM public.sovereignflow_policy_versions WHERE tenant_id = %s",
+                "DELETE FROM sf.policy_versions WHERE tenant_id = %s",
                 (tenant_id,),
             )
             connection.commit()

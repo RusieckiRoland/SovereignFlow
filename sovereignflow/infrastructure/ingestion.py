@@ -56,7 +56,7 @@ class PostgreSQLIngestionRepository:
                     cursor.execute(
                         """
                         SELECT job_id, payload_hash
-                        FROM ingestion.jobs
+                        FROM sf.jobs
                         WHERE tenant_id = %s AND domain = %s AND idempotency_key = %s
                         """,
                         (command.tenant_id, command.domain, command.idempotency_key),
@@ -74,7 +74,7 @@ class PostgreSQLIngestionRepository:
                     cursor.execute(
                         """
                         SELECT payload_hash
-                        FROM ingestion.source_versions
+                        FROM sf.source_versions
                         WHERE tenant_id = %s AND domain = %s
                           AND source_id = %s AND source_version = %s
                         """,
@@ -93,7 +93,7 @@ class PostgreSQLIngestionRepository:
                     if existing_version is None:
                         cursor.execute(
                             """
-                            INSERT INTO ingestion.source_versions (
+                            INSERT INTO sf.source_versions (
                                 tenant_id, domain, source_id, source_version,
                                 source_uri, payload_hash, metadata_json
                             )
@@ -112,7 +112,7 @@ class PostgreSQLIngestionRepository:
                         for position, chunk in enumerate(command.chunks):
                             cursor.execute(
                                 """
-                                INSERT INTO ingestion.chunks (
+                                INSERT INTO sf.chunks (
                                     tenant_id, domain, source_id, source_version,
                                     chunk_id, position, source_uri, text_content,
                                     metadata_json, acl_labels, clearance_label,
@@ -148,7 +148,7 @@ class PostgreSQLIngestionRepository:
                                 )
                             cursor.execute(
                                 """
-                                INSERT INTO graph.relationships (
+                                INSERT INTO sf.relationships (
                                     tenant_id, domain, owner_source_id, owner_source_version,
                                     from_source_id, from_chunk_id, to_source_id, to_chunk_id,
                                     relationship_type, metadata_json
@@ -172,7 +172,7 @@ class PostgreSQLIngestionRepository:
                             )
                     cursor.execute(
                         """
-                        INSERT INTO ingestion.jobs (
+                        INSERT INTO sf.jobs (
                             job_id, tenant_id, domain, source_id, source_version,
                             idempotency_key, payload_hash, status
                         )
@@ -225,7 +225,7 @@ class PostgreSQLIngestionRepository:
     def mark_indexing(self, job_id: str) -> None:
         self._transition(
             """
-            UPDATE ingestion.jobs
+            UPDATE sf.jobs
             SET status = 'indexing',
                 attempts = attempts + 1,
                 error_code = NULL,
@@ -247,7 +247,7 @@ class PostgreSQLIngestionRepository:
                 with connection.cursor() as cursor:
                     cursor.execute(
                         """
-                        UPDATE ingestion.jobs
+                        UPDATE sf.jobs
                         SET status = 'indexed', updated_at = NOW(), completed_at = NOW()
                         WHERE job_id = %s AND status = 'indexing'
                         RETURNING tenant_id, domain, source_id, source_version
@@ -259,7 +259,7 @@ class PostgreSQLIngestionRepository:
                         raise IngestionError("Ingestion job cannot enter indexed state")
                     cursor.execute(
                         """
-                        INSERT INTO ingestion.sources (
+                        INSERT INTO sf.sources (
                             tenant_id, domain, source_id, current_version,
                             current_job_id, updated_at
                         )
@@ -281,7 +281,7 @@ class PostgreSQLIngestionRepository:
     def mark_failed(self, job_id: str, *, error_code: str, error_message: str) -> None:
         self._transition(
             """
-            UPDATE ingestion.jobs
+            UPDATE sf.jobs
             SET status = 'failed',
                 error_code = %s,
                 error_message = %s,
@@ -309,7 +309,7 @@ class PostgreSQLIngestionRepository:
                     cursor.execute(
                         """
                         SELECT current_version
-                        FROM ingestion.sources
+                        FROM sf.sources
                         WHERE tenant_id = %s AND domain = %s AND source_id = %s
                         """,
                         (command.tenant_id, command.domain, command.source_id),
@@ -321,7 +321,7 @@ class PostgreSQLIngestionRepository:
                         )
                     cursor.execute(
                         """
-                        DELETE FROM graph.relationships
+                        DELETE FROM sf.relationships
                         WHERE tenant_id = %s AND domain = %s
                           AND owner_source_id = %s AND owner_source_version = %s
                         """,
@@ -339,7 +339,7 @@ class PostgreSQLIngestionRepository:
                             )
                         cursor.execute(
                             """
-                            INSERT INTO graph.relationships (
+                            INSERT INTO sf.relationships (
                                 tenant_id, domain, owner_source_id, owner_source_version,
                                 from_source_id, from_chunk_id, to_source_id, to_chunk_id,
                                 relationship_type, metadata_json
@@ -385,7 +385,7 @@ class PostgreSQLIngestionRepository:
                     )
                     cursor.execute(
                         """
-                        DELETE FROM graph.relationships
+                        DELETE FROM sf.relationships
                         WHERE tenant_id = %s AND domain = %s
                           AND (from_source_id = %s OR to_source_id = %s)
                         """,
@@ -393,7 +393,7 @@ class PostgreSQLIngestionRepository:
                     )
                     cursor.execute(
                         """
-                        DELETE FROM ingestion.sources
+                        DELETE FROM sf.sources
                         WHERE tenant_id = %s AND domain = %s AND source_id = %s
                         """,
                         (tenant_id, domain, source_id),
@@ -416,7 +416,7 @@ class PostgreSQLIngestionRepository:
                                source_count, chunk_count, relationship_count, deletion_count,
                                indexed_sources, published_relationships, deleted_sources,
                                error_code, error_message
-                        FROM ingestion.import_runs
+                        FROM sf.import_runs
                         WHERE import_id = %s
                         """,
                         (request.import_id,),
@@ -435,7 +435,7 @@ class PostgreSQLIngestionRepository:
                         return run
                     cursor.execute(
                         """
-                        INSERT INTO ingestion.import_runs (
+                        INSERT INTO sf.import_runs (
                             import_id, tenant_id, domain, dataset_hash, status,
                             source_count, chunk_count, relationship_count, deletion_count
                         )
@@ -485,7 +485,7 @@ class PostgreSQLIngestionRepository:
                            source_count, chunk_count, relationship_count, deletion_count,
                            indexed_sources, published_relationships, deleted_sources,
                            error_code, error_message
-                    FROM ingestion.import_runs
+                    FROM sf.import_runs
                     WHERE import_id = %s AND tenant_id = %s
                     """,
                     (import_id, tenant_id),
@@ -511,7 +511,7 @@ class PostgreSQLIngestionRepository:
         completed = status == DatasetImportStatus.COMPLETED
         self._transition(
             """
-            UPDATE ingestion.import_runs
+            UPDATE sf.import_runs
             SET status = %s,
                 indexed_sources = %s,
                 published_relationships = %s,
@@ -537,7 +537,7 @@ class PostgreSQLIngestionRepository:
     def fail_import(self, import_id: str, *, error_code: str, error_message: str) -> None:
         self._transition(
             """
-            UPDATE ingestion.import_runs
+            UPDATE sf.import_runs
             SET status = 'failed',
                 error_code = %s,
                 error_message = %s,
@@ -564,19 +564,19 @@ class PostgreSQLIngestionRepository:
                     """
                     SELECT
                         (SELECT COUNT(*)
-                         FROM ingestion.sources
+                         FROM sf.sources
                          WHERE tenant_id = %s AND domain = %s),
                         (SELECT COUNT(*)
-                         FROM ingestion.sources source
-                         JOIN ingestion.chunks chunk
+                         FROM sf.sources source
+                         JOIN sf.chunks chunk
                            ON chunk.tenant_id = source.tenant_id
                           AND chunk.domain = source.domain
                           AND chunk.source_id = source.source_id
                           AND chunk.source_version = source.current_version
                          WHERE source.tenant_id = %s AND source.domain = %s),
                         (SELECT COUNT(*)
-                         FROM graph.relationships relationship
-                         JOIN ingestion.sources source
+                         FROM sf.relationships relationship
+                         JOIN sf.sources source
                            ON source.tenant_id = relationship.tenant_id
                           AND source.domain = relationship.domain
                           AND source.source_id = relationship.owner_source_id
@@ -610,8 +610,8 @@ class PostgreSQLIngestionRepository:
             SELECT j.job_id, j.payload_hash, j.status, j.attempts,
                    j.idempotency_key, j.domain, j.tenant_id, j.source_id,
                    j.source_version, v.source_uri, v.metadata_json
-            FROM ingestion.jobs j
-            JOIN ingestion.source_versions v
+            FROM sf.jobs j
+            JOIN sf.source_versions v
               ON v.tenant_id = j.tenant_id
              AND v.domain = j.domain
              AND v.source_id = j.source_id
@@ -628,7 +628,7 @@ class PostgreSQLIngestionRepository:
             """
             SELECT chunk_id, source_uri, text_content, metadata_json,
                    acl_labels, clearance_label, classification_labels
-            FROM ingestion.chunks
+            FROM sf.chunks
             WHERE tenant_id = %s AND domain = %s
               AND source_id = %s AND source_version = %s
             ORDER BY position
@@ -656,7 +656,7 @@ class PostgreSQLIngestionRepository:
             """
             SELECT from_source_id, from_chunk_id, to_source_id, to_chunk_id,
                    relationship_type, metadata_json
-            FROM graph.relationships
+            FROM sf.relationships
             WHERE tenant_id = %s AND domain = %s
               AND owner_source_id = %s AND owner_source_version = %s
             ORDER BY from_source_id, from_chunk_id, to_source_id, to_chunk_id,
@@ -697,8 +697,8 @@ class PostgreSQLIngestionRepository:
             """
             SELECT EXISTS (
                 SELECT 1
-                FROM ingestion.sources source
-                JOIN ingestion.chunks chunk
+                FROM sf.sources source
+                JOIN sf.chunks chunk
                   ON chunk.tenant_id = source.tenant_id
                  AND chunk.domain = source.domain
                  AND chunk.source_id = source.source_id

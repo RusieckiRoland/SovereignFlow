@@ -1,6 +1,6 @@
-CREATE SCHEMA IF NOT EXISTS execution;
+CREATE SCHEMA IF NOT EXISTS sf;
 
-CREATE TABLE IF NOT EXISTS execution.pipeline_runs (
+CREATE TABLE IF NOT EXISTS sf.pipeline_runs (
     run_id UUID PRIMARY KEY,
     request_id TEXT NOT NULL,
     session_id TEXT NOT NULL,
@@ -30,13 +30,13 @@ CREATE TABLE IF NOT EXISTS execution.pipeline_runs (
 );
 
 CREATE INDEX IF NOT EXISTS ix_pipeline_runs_tenant_request
-    ON execution.pipeline_runs (tenant_id, request_id, started_at DESC);
+    ON sf.pipeline_runs (tenant_id, request_id, started_at DESC);
 
 CREATE INDEX IF NOT EXISTS ix_pipeline_runs_tenant_session
-    ON execution.pipeline_runs (tenant_id, session_id, started_at DESC);
+    ON sf.pipeline_runs (tenant_id, session_id, started_at DESC);
 
-CREATE TABLE IF NOT EXISTS execution.pipeline_steps (
-    run_id UUID NOT NULL REFERENCES execution.pipeline_runs(run_id) ON DELETE CASCADE,
+CREATE TABLE IF NOT EXISTS sf.pipeline_steps (
+    run_id UUID NOT NULL REFERENCES sf.pipeline_runs(run_id) ON DELETE CASCADE,
     sequence_number INTEGER NOT NULL,
     step_id TEXT NOT NULL,
     action_id TEXT NOT NULL,

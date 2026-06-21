@@ -146,17 +146,15 @@
       "fullScopeAllowed": true,
       "redirectUris": [
         "http://127.0.0.1:8000/app/",
-        "http://localhost:8000/app/",
-        "https://app.taricai.com/app/"
+        "http://localhost:8000/app/"
       ],
       "webOrigins": [
         "http://127.0.0.1:8000",
-        "http://localhost:8000",
-        "https://app.taricai.com"
+        "http://localhost:8000"
       ],
       "attributes": {
         "pkce.code.challenge.method": "S256",
-        "post.logout.redirect.uris": "http://127.0.0.1:8000/app/##http://localhost:8000/app/##https://app.taricai.com/app/"
+        "post.logout.redirect.uris": "http://127.0.0.1:8000/app/##http://localhost:8000/app/"
       },
       "protocolMappers": [
         {
@@ -285,11 +283,21 @@
     }
   ],
   "groups": [
-    {"name": "integration"},
-    {"name": "restricted"},
-    {"name": "direct-users"},
-    {"name": "graph-users"},
-    {"name": "strict-users"}
+    {
+      "name": "integration"
+    },
+    {
+      "name": "restricted"
+    },
+    {
+      "name": "direct-users"
+    },
+    {
+      "name": "graph-users"
+    },
+    {
+      "name": "strict-users"
+    }
   ],
   "users": [
     {
@@ -300,7 +308,9 @@
       "email": "integration-user@sovereignflow.test",
       "emailVerified": true,
       "requiredActions": [],
-      "groups": ["/integration"],
+      "groups": [
+        "/integration"
+      ],
       "credentials": [
         {
           "type": "password",
@@ -309,12 +319,26 @@
         }
       ],
       "attributes": {
-        "tenant_id": ["tenant_0001"],
-        "sovereignflow_roles": ["rag-user"],
-        "acl_labels": ["public", "internal", "restricted"],
-        "max_classification_level": ["3"],
-        "allow_external_model": ["true"],
-        "sovereignflow_diagnostics": ["true"]
+        "tenant_id": [
+          "tenant_0001"
+        ],
+        "sovereignflow_roles": [
+          "rag-user"
+        ],
+        "acl_labels": [
+          "public",
+          "internal",
+          "restricted"
+        ],
+        "max_classification_level": [
+          "3"
+        ],
+        "allow_external_model": [
+          "true"
+        ],
+        "sovereignflow_diagnostics": [
+          "true"
+        ]
       }
     },
     {
@@ -325,7 +349,9 @@
       "email": "restricted-user@sovereignflow.test",
       "emailVerified": true,
       "requiredActions": [],
-      "groups": ["/restricted"],
+      "groups": [
+        "/restricted"
+      ],
       "credentials": [
         {
           "type": "password",
@@ -334,12 +360,24 @@
         }
       ],
       "attributes": {
-        "tenant_id": ["tenant_0001"],
-        "sovereignflow_roles": ["rag-user"],
-        "acl_labels": ["public"],
-        "max_classification_level": ["1"],
-        "allow_external_model": ["false"],
-        "sovereignflow_diagnostics": ["false"]
+        "tenant_id": [
+          "tenant_0001"
+        ],
+        "sovereignflow_roles": [
+          "rag-user"
+        ],
+        "acl_labels": [
+          "public"
+        ],
+        "max_classification_level": [
+          "1"
+        ],
+        "allow_external_model": [
+          "false"
+        ],
+        "sovereignflow_diagnostics": [
+          "false"
+        ]
       }
     },
     {
@@ -350,7 +388,9 @@
       "email": "direct-user@sovereignflow.test",
       "emailVerified": true,
       "requiredActions": [],
-      "groups": ["/direct-users"],
+      "groups": [
+        "/direct-users"
+      ],
       "credentials": [
         {
           "type": "password",
@@ -359,12 +399,24 @@
         }
       ],
       "attributes": {
-        "tenant_id": ["tenant_0001"],
-        "sovereignflow_roles": ["rag-user"],
-        "acl_labels": ["public"],
-        "max_classification_level": ["1"],
-        "allow_external_model": ["false"],
-        "sovereignflow_diagnostics": ["true"]
+        "tenant_id": [
+          "tenant_0001"
+        ],
+        "sovereignflow_roles": [
+          "rag-user"
+        ],
+        "acl_labels": [
+          "public"
+        ],
+        "max_classification_level": [
+          "1"
+        ],
+        "allow_external_model": [
+          "false"
+        ],
+        "sovereignflow_diagnostics": [
+          "true"
+        ]
       }
     },
     {
@@ -375,7 +427,9 @@
       "email": "graph-user@sovereignflow.test",
       "emailVerified": true,
       "requiredActions": [],
-      "groups": ["/graph-users"],
+      "groups": [
+        "/graph-users"
+      ],
       "credentials": [
         {
           "type": "password",
@@ -384,12 +438,25 @@
         }
       ],
       "attributes": {
-        "tenant_id": ["tenant_0001"],
-        "sovereignflow_roles": ["rag-user"],
-        "acl_labels": ["public", "internal"],
-        "max_classification_level": ["2"],
-        "allow_external_model": ["false"],
-        "sovereignflow_diagnostics": ["true"]
+        "tenant_id": [
+          "tenant_0001"
+        ],
+        "sovereignflow_roles": [
+          "rag-user"
+        ],
+        "acl_labels": [
+          "public",
+          "internal"
+        ],
+        "max_classification_level": [
+          "2"
+        ],
+        "allow_external_model": [
+          "false"
+        ],
+        "sovereignflow_diagnostics": [
+          "true"
+        ]
       }
     },
     {
@@ -400,7 +467,9 @@
       "email": "strict-user@sovereignflow.test",
       "emailVerified": true,
       "requiredActions": [],
-      "groups": ["/strict-users"],
+      "groups": [
+        "/strict-users"
+      ],
       "credentials": [
         {
           "type": "password",
@@ -409,12 +478,26 @@
         }
       ],
       "attributes": {
-        "tenant_id": ["tenant_0001"],
-        "sovereignflow_roles": ["rag-user"],
-        "acl_labels": ["public", "internal", "restricted"],
-        "max_classification_level": ["3"],
-        "allow_external_model": ["true"],
-        "sovereignflow_diagnostics": ["true"]
+        "tenant_id": [
+          "tenant_0001"
+        ],
+        "sovereignflow_roles": [
+          "rag-user"
+        ],
+        "acl_labels": [
+          "public",
+          "internal",
+          "restricted"
+        ],
+        "max_classification_level": [
+          "3"
+        ],
+        "allow_external_model": [
+          "true"
+        ],
+        "sovereignflow_diagnostics": [
+          "true"
+        ]
       }
     }
   ]

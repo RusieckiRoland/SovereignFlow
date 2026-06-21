@@ -70,7 +70,7 @@ def test_migrations_are_applied_in_order(monkeypatch) -> None:
         statement for statement, _ in cursor.executed if "CREATE SCHEMA" in statement
     ]
     assert connection.commits == 1
-    assert len(migration_statements) == 4
+    assert len(migration_statements) == 2
 
 
 def test_existing_migrations_are_verified_and_skipped(monkeypatch) -> None:
@@ -91,7 +91,8 @@ def test_existing_migrations_are_verified_and_skipped(monkeypatch) -> None:
 
     runner().migrate()
 
-    assert not any("CREATE SCHEMA" in statement for statement, _ in cursor.executed)
+    inserts = [s for s, _ in cursor.executed if "INSERT INTO sf.schema_migrations" in s]
+    assert not inserts
 
 
 def test_migration_checksum_and_database_failures_are_explicit(monkeypatch) -> None:

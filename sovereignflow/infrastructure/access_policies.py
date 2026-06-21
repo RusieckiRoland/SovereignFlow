@@ -35,7 +35,7 @@ class PostgreSQLAccessPolicyRepository:
                 cursor.execute(
                     """
                     SELECT version
-                    FROM public.sovereignflow_policy_versions
+                    FROM sf.policy_versions
                     WHERE tenant_id = %s AND active = TRUE
                     """,
                     (authorization.tenant_id,),
@@ -47,8 +47,8 @@ class PostgreSQLAccessPolicyRepository:
                 cursor.execute(
                     """
                     SELECT DISTINCT mapping.group_id
-                    FROM public.sovereignflow_claim_group_mappings mapping
-                    JOIN public.sovereignflow_security_groups security_group
+                    FROM sf.claim_group_mappings mapping
+                    JOIN sf.security_groups security_group
                       ON security_group.tenant_id = mapping.tenant_id
                      AND security_group.group_id = mapping.group_id
                     WHERE mapping.tenant_id = %s
@@ -75,8 +75,8 @@ class PostgreSQLAccessPolicyRepository:
                 cursor.execute(
                     """
                     SELECT DISTINCT assignment.capability_id, capability.pipeline_name
-                    FROM public.sovereignflow_group_capabilities assignment
-                    JOIN public.sovereignflow_capabilities capability
+                    FROM sf.group_capabilities assignment
+                    JOIN sf.capabilities capability
                       ON capability.tenant_id = assignment.tenant_id
                      AND capability.capability_id = assignment.capability_id
                     WHERE assignment.tenant_id = %s
@@ -119,7 +119,7 @@ class PostgreSQLAccessPolicyRepository:
                     """
                     SELECT capability_id, display_name, description, domain,
                            pipeline_name, diagnostics_available, external_model
-                    FROM public.sovereignflow_capabilities
+                    FROM sf.capabilities
                     WHERE tenant_id = %s
                       AND capability_id = ANY(%s)
                       AND active = TRUE
@@ -171,7 +171,7 @@ class PostgreSQLAccessPolicyRepository:
                 cursor.execute(
                     """
                     SELECT version
-                    FROM public.sovereignflow_policy_versions
+                    FROM sf.policy_versions
                     WHERE tenant_id = %s
                     FOR UPDATE
                     """,
@@ -183,7 +183,7 @@ class PostgreSQLAccessPolicyRepository:
                     raise ConflictError("Access policy version changed before publication")
                 cursor.execute(
                     """
-                    INSERT INTO public.sovereignflow_policy_versions (
+                    INSERT INTO sf.policy_versions (
                         tenant_id, version, active, updated_at
                     ) VALUES (%s, %s, TRUE, NOW())
                     ON CONFLICT (tenant_id) DO UPDATE
@@ -194,24 +194,24 @@ class PostgreSQLAccessPolicyRepository:
                     (bundle.tenant_id, bundle.version),
                 )
                 cursor.execute(
-                    "DELETE FROM public.sovereignflow_claim_group_mappings WHERE tenant_id = %s",
+                    "DELETE FROM sf.claim_group_mappings WHERE tenant_id = %s",
                     (bundle.tenant_id,),
                 )
                 cursor.execute(
-                    "DELETE FROM public.sovereignflow_group_capabilities WHERE tenant_id = %s",
+                    "DELETE FROM sf.group_capabilities WHERE tenant_id = %s",
                     (bundle.tenant_id,),
                 )
                 cursor.execute(
-                    "DELETE FROM public.sovereignflow_capabilities WHERE tenant_id = %s",
+                    "DELETE FROM sf.capabilities WHERE tenant_id = %s",
                     (bundle.tenant_id,),
                 )
                 cursor.execute(
-                    "DELETE FROM public.sovereignflow_security_groups WHERE tenant_id = %s",
+                    "DELETE FROM sf.security_groups WHERE tenant_id = %s",
                     (bundle.tenant_id,),
                 )
                 cursor.executemany(
                     """
-                    INSERT INTO public.sovereignflow_security_groups (
+                    INSERT INTO sf.security_groups (
                         tenant_id, group_id, active
                     ) VALUES (%s, %s, TRUE)
                     """,
@@ -219,7 +219,7 @@ class PostgreSQLAccessPolicyRepository:
                 )
                 cursor.executemany(
                     """
-                    INSERT INTO public.sovereignflow_claim_group_mappings (
+                    INSERT INTO sf.claim_group_mappings (
                         tenant_id, claim_name, claim_value, group_id
                     ) VALUES (%s, %s, %s, %s)
                     """,
@@ -235,7 +235,7 @@ class PostgreSQLAccessPolicyRepository:
                 )
                 cursor.executemany(
                     """
-                    INSERT INTO public.sovereignflow_capabilities (
+                    INSERT INTO sf.capabilities (
                         tenant_id, capability_id, display_name, description,
                         domain, pipeline_name, diagnostics_available,
                         external_model, active
@@ -257,7 +257,7 @@ class PostgreSQLAccessPolicyRepository:
                 )
                 cursor.executemany(
                     """
-                    INSERT INTO public.sovereignflow_group_capabilities (
+                    INSERT INTO sf.group_capabilities (
                         tenant_id, group_id, capability_id
                     ) VALUES (%s, %s, %s)
                     """,
@@ -268,7 +268,7 @@ class PostgreSQLAccessPolicyRepository:
                 )
                 cursor.execute(
                     """
-                    INSERT INTO public.sovereignflow_policy_changes (
+                    INSERT INTO sf.policy_changes (
                         tenant_id, previous_version, published_version
                     ) VALUES (%s, %s, %s)
                     """,
@@ -290,7 +290,7 @@ class PostgreSQLAccessPolicyRepository:
                 ) as connection,
                 connection.cursor() as cursor,
             ):
-                cursor.execute("SELECT 1 FROM public.sovereignflow_policy_versions LIMIT 1")
+                cursor.execute("SELECT 1 FROM sf.policy_versions LIMIT 1")
                 cursor.fetchone()
         except Exception as exc:
             raise DependencyUnavailableError("Access policy repository is unavailable") from exc
@@ -325,7 +325,7 @@ class PostgreSQLSecurityDecisionAudit:
             ):
                 cursor.execute(
                     """
-                    INSERT INTO public.sovereignflow_security_decisions (
+                    INSERT INTO sf.security_decisions (
                         request_id, subject_hash, tenant_id, capability_id,
                         pipeline_name, allowed, reason_code, policy_version
                     ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)

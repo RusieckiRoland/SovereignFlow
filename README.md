@@ -24,7 +24,7 @@ It is extracted from the architectural lessons of LocalAI-RAG, but it is not a c
 
 ## What belongs outside the core
 
-Domain repositories such as TaricAI provide:
+Domain repositories provide:
 
 - source-specific importers,
 - domain-specific relational schemas,
@@ -489,4 +489,4 @@ The reusable foundation intentionally does not include:
 
 Stage 5 is complete. SovereignFlow 1.0 provides the professional domain-neutral foundation extracted from LocalAI-RAG: clean architectural boundaries, versioned pipelines, durable ingestion, Weaviate retrieval, PostgreSQL graph expansion, explicit model and embedding services, execution audit, operational metrics, and authenticated tenant-scoped administration.
 
-The next work belongs to domain packages such as TaricAI and to optional platform evolution that preserves these public contracts.
+The next work belongs to domain packages and to optional platform evolution that preserves these public contracts.

@@ -141,8 +141,8 @@ class PostgreSQLGraphTraversal:
             SELECT relationship.from_source_id, relationship.from_chunk_id,
                    relationship.to_source_id, relationship.to_chunk_id,
                    relationship.relationship_type
-            FROM graph.relationships relationship
-            JOIN ingestion.sources owner
+            FROM sf.relationships relationship
+            JOIN sf.sources owner
               ON owner.tenant_id = relationship.tenant_id
              AND owner.domain = relationship.domain
              AND owner.source_id = relationship.owner_source_id
@@ -219,8 +219,8 @@ class PostgreSQLGraphTraversal:
             SELECT chunk.source_id, chunk.chunk_id, chunk.source_uri,
                    chunk.text_content, chunk.metadata_json, chunk.acl_labels,
                    chunk.clearance_label, chunk.classification_labels
-            FROM ingestion.sources source
-            JOIN ingestion.chunks chunk
+            FROM sf.sources source
+            JOIN sf.chunks chunk
               ON chunk.tenant_id = source.tenant_id
              AND chunk.domain = source.domain
              AND chunk.source_id = source.source_id

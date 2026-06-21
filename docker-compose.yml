@@ -9,6 +9,7 @@ services:
       - "127.0.0.1:${SOVEREIGNFLOW_POSTGRES_PORT:-15432}:5432"
     volumes:
       - sovereignflow_postgres:/var/lib/postgresql/data
+      - ./infra/postgres/init-keycloak-db.sh:/docker-entrypoint-initdb.d/init-keycloak-db.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U sovereignflow"]
       interval: 10s
@@ -38,15 +39,21 @@ services:
   keycloak:
     image: quay.io/keycloak/keycloak:26.1
     profiles: ["identity"]
+    depends_on:
+      postgres:
+        condition: service_healthy
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${SF_KEYCLOAK_ADMIN_PASSWORD:?SF_KEYCLOAK_ADMIN_PASSWORD is required}
-      KC_DB: dev-file
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: sovereignflow
+      KC_DB_PASSWORD: ${SF_POSTGRES_PASSWORD:?SF_POSTGRES_PASSWORD is required}
       KC_HTTP_ENABLED: "true"
       KC_HEALTH_ENABLED: "true"
       KC_METRICS_ENABLED: "true"
       KC_PROXY_HEADERS: xforwarded
-      KC_HOSTNAME: https://auth.taricai.com
+      KC_HOSTNAME: ${SF_KC_HOSTNAME:?SF_KC_HOSTNAME is required}
     command:
       - start-dev
       - --import-realm

@@ -1,6 +1,4 @@
-CREATE SCHEMA IF NOT EXISTS graph;
-
-CREATE TABLE IF NOT EXISTS graph.relationships (
+CREATE TABLE IF NOT EXISTS sf.relationships (
     tenant_id TEXT NOT NULL,
     domain TEXT NOT NULL,
     owner_source_id TEXT NOT NULL,
@@ -30,7 +28,7 @@ CREATE TABLE IF NOT EXISTS graph.relationships (
             owner_source_id,
             owner_source_version
         )
-        REFERENCES ingestion.source_versions (
+        REFERENCES sf.source_versions (
             tenant_id,
             domain,
             source_id,
@@ -45,7 +43,7 @@ CREATE TABLE IF NOT EXISTS graph.relationships (
             owner_source_version,
             from_chunk_id
         )
-        REFERENCES ingestion.chunks (
+        REFERENCES sf.chunks (
             tenant_id,
             domain,
             source_id,
@@ -60,7 +58,7 @@ CREATE TABLE IF NOT EXISTS graph.relationships (
 );
 
 CREATE INDEX IF NOT EXISTS ix_graph_relationships_outgoing
-    ON graph.relationships (
+    ON sf.relationships (
         tenant_id,
         domain,
         from_source_id,
@@ -69,7 +67,7 @@ CREATE INDEX IF NOT EXISTS ix_graph_relationships_outgoing
     );
 
 CREATE INDEX IF NOT EXISTS ix_graph_relationships_incoming
-    ON graph.relationships (
+    ON sf.relationships (
         tenant_id,
         domain,
         to_source_id,

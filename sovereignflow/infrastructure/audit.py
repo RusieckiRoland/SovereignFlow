@@ -26,7 +26,7 @@ class PostgreSQLExecutionAudit:
     def start(self, run: PipelineRun) -> None:
         self._execute(
             """
-            INSERT INTO execution.pipeline_runs (
+            INSERT INTO sf.pipeline_runs (
                 run_id, request_id, session_id, domain, tenant_id,
                 pipeline_name, pipeline_version, pipeline_checksum,
                 status, query_text
@@ -49,7 +49,7 @@ class PostgreSQLExecutionAudit:
     def record_step(self, step: PipelineStepAudit) -> None:
         self._execute(
             """
-            INSERT INTO execution.pipeline_steps (
+            INSERT INTO sf.pipeline_steps (
                 run_id, sequence_number, step_id, action_id,
                 action_version, duration_ms, next_step_id
             )
@@ -118,7 +118,7 @@ class PostgreSQLExecutionAudit:
                                status, query_text, answer_text, citation_count,
                                error_code, error_message, started_at, completed_at,
                                prompt_tokens, completion_tokens, estimated_cost
-                        FROM execution.pipeline_runs
+                        FROM sf.pipeline_runs
                         WHERE request_id = %s AND tenant_id = %s
                         ORDER BY started_at DESC
                         LIMIT 1
@@ -132,7 +132,7 @@ class PostgreSQLExecutionAudit:
                     """
                         SELECT sequence_number, step_id, action_id, action_version,
                                duration_ms, next_step_id, completed_at
-                        FROM execution.pipeline_steps
+                        FROM sf.pipeline_steps
                         WHERE run_id = %s
                         ORDER BY sequence_number
                         """,
@@ -202,7 +202,7 @@ class PostgreSQLExecutionAudit:
                            COALESCE(SUM(prompt_tokens), 0),
                            COALESCE(SUM(completion_tokens), 0),
                            COALESCE(SUM(estimated_cost), 0)
-                    FROM execution.pipeline_runs
+                    FROM sf.pipeline_runs
                     WHERE tenant_id = %s
                       AND started_at >= NOW() - (%s * INTERVAL '1 hour')
                     """,
@@ -212,8 +212,8 @@ class PostgreSQLExecutionAudit:
                 cursor.execute(
                     """
                     SELECT step.action_id, COUNT(*), COALESCE(AVG(step.duration_ms), 0)
-                    FROM execution.pipeline_steps step
-                    JOIN execution.pipeline_runs run ON run.run_id = step.run_id
+                    FROM sf.pipeline_steps step
+                    JOIN sf.pipeline_runs run ON run.run_id = step.run_id
                     WHERE run.tenant_id = %s
                       AND run.started_at >= NOW() - (%s * INTERVAL '1 hour')
                     GROUP BY step.action_id
@@ -264,7 +264,7 @@ class PostgreSQLExecutionAudit:
     ) -> None:
         self._execute(
             """
-            UPDATE execution.pipeline_runs
+            UPDATE sf.pipeline_runs
             SET status = %s,
                 answer_text = %s,
                 citation_count = %s,

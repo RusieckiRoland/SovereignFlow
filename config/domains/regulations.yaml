@@ -1,0 +1,37 @@
+name: regulations
+description: Critical Infrastructure Data Governance Regulation (RCIDG) — demo domain
+collection: SovereignFlowRegulations
+tenant_id: tenant_demo
+prompt_name: answer
+pipeline_name: default
+allowed_pipeline_names:
+  - default
+  - direct
+  - graph
+  - strict
+  - conversation
+allow_external_model: false
+disclaimer: |
+  This response is generated from retrieved regulatory text. It is for demonstration
+  purposes only and does not constitute legal advice.
+security:
+  acl:
+    enabled: true
+    allowed_labels:
+      - public
+  require_travel_permission: false
+  security_model:
+    kind: none
+retrieval:
+  mode: hybrid
+  top_k: 5
+  max_context_characters: 16000
+  filters: {}
+  allowed_filter_fields: []
+graph:
+  enabled: true
+  max_depth: 2
+  max_nodes: 20
+  direction: both
+  relationship_types:
+    - references

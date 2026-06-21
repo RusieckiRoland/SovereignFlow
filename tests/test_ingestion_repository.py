@@ -162,9 +162,9 @@ def test_stage_persists_new_source_chunks_and_job(monkeypatch) -> None:
 
     assert job.status == IngestionJobStatus.STAGED
     assert connections[0].commits == 1
-    assert any("INSERT INTO ingestion.source_versions" in call[0] for call in cursor.executed)
-    assert any("INSERT INTO ingestion.chunks" in call[0] for call in cursor.executed)
-    assert any("INSERT INTO ingestion.jobs" in call[0] for call in cursor.executed)
+    assert any("INSERT INTO sf.source_versions" in call[0] for call in cursor.executed)
+    assert any("INSERT INTO sf.chunks" in call[0] for call in cursor.executed)
+    assert any("INSERT INTO sf.jobs" in call[0] for call in cursor.executed)
 
 
 def test_stage_returns_existing_idempotent_job(monkeypatch) -> None:
@@ -196,7 +196,7 @@ def test_stage_reuses_identical_source_version_and_maps_database_failure(monkeyp
 
     repository().stage(command(), payload_hash="a" * 64)
 
-    assert not any("INSERT INTO ingestion.chunks" in call[0] for call in cursor.executed)
+    assert not any("INSERT INTO sf.chunks" in call[0] for call in cursor.executed)
 
     install(monkeypatch, Cursor(error=RuntimeError("down")))
     with pytest.raises(DependencyUnavailableError, match="stage failed"):
@@ -214,7 +214,7 @@ def test_stage_persists_internal_and_validates_external_relationships(monkeypatc
     install(monkeypatch, internal_cursor)
     repository().stage(command(relationships=(internal,)), payload_hash="a" * 64)
     assert any(
-        "INSERT INTO graph.relationships" in statement for statement, _ in internal_cursor.executed
+        "INSERT INTO sf.relationships" in statement for statement, _ in internal_cursor.executed
     )
 
     external = GraphRelationship(
@@ -389,8 +389,8 @@ def test_relationship_publication_validates_active_source_and_targets(monkeypatc
 
     repository().replace_relationships(selected)
 
-    assert any("DELETE FROM graph.relationships" in item[0] for item in cursor.executed)
-    assert any("INSERT INTO graph.relationships" in item[0] for item in cursor.executed)
+    assert any("DELETE FROM sf.relationships" in item[0] for item in cursor.executed)
+    assert any("INSERT INTO sf.relationships" in item[0] for item in cursor.executed)
 
     install(monkeypatch, Cursor(one=[("v2",)]))
     with pytest.raises(ConflictError, match="active"):
@@ -416,8 +416,8 @@ def test_source_deletion_is_atomic_and_maps_failure(monkeypatch) -> None:
     )
 
     assert connection.commits == 1
-    assert any("DELETE FROM graph.relationships" in item[0] for item in cursor.executed)
-    assert any("DELETE FROM ingestion.sources" in item[0] for item in cursor.executed)
+    assert any("DELETE FROM sf.relationships" in item[0] for item in cursor.executed)
+    assert any("DELETE FROM sf.sources" in item[0] for item in cursor.executed)
 
     install(monkeypatch, Cursor(error=RuntimeError("down")))
     with pytest.raises(DependencyUnavailableError, match="deletion"):
@@ -433,7 +433,7 @@ def test_import_run_start_load_update_fail_and_conflicts(monkeypatch) -> None:
     install(monkeypatch, create_cursor)
     created = repository().start_import(import_request())
     assert created.status == DatasetImportStatus.STAGING
-    assert any("INSERT INTO ingestion.import_runs" in item[0] for item in create_cursor.executed)
+    assert any("INSERT INTO sf.import_runs" in item[0] for item in create_cursor.executed)
 
     install(monkeypatch, Cursor(one=[import_row(status="completed")]))
     existing = repository().start_import(import_request())

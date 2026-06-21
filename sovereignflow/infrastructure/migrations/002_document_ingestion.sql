@@ -1,6 +1,4 @@
-CREATE SCHEMA IF NOT EXISTS ingestion;
-
-CREATE TABLE IF NOT EXISTS ingestion.source_versions (
+CREATE TABLE IF NOT EXISTS sf.source_versions (
     tenant_id TEXT NOT NULL,
     domain TEXT NOT NULL,
     source_id TEXT NOT NULL,
@@ -12,7 +10,7 @@ CREATE TABLE IF NOT EXISTS ingestion.source_versions (
     PRIMARY KEY (tenant_id, domain, source_id, source_version)
 );
 
-CREATE TABLE IF NOT EXISTS ingestion.chunks (
+CREATE TABLE IF NOT EXISTS sf.chunks (
     tenant_id TEXT NOT NULL,
     domain TEXT NOT NULL,
     source_id TEXT NOT NULL,
@@ -28,7 +26,7 @@ CREATE TABLE IF NOT EXISTS ingestion.chunks (
     PRIMARY KEY (tenant_id, domain, source_id, source_version, chunk_id),
     CONSTRAINT fk_ingestion_chunks_source_version
         FOREIGN KEY (tenant_id, domain, source_id, source_version)
-        REFERENCES ingestion.source_versions (
+        REFERENCES sf.source_versions (
             tenant_id, domain, source_id, source_version
         )
         ON DELETE CASCADE,
@@ -37,11 +35,11 @@ CREATE TABLE IF NOT EXISTS ingestion.chunks (
 );
 
 CREATE INDEX IF NOT EXISTS ix_ingestion_chunks_source_order
-    ON ingestion.chunks (
+    ON sf.chunks (
         tenant_id, domain, source_id, source_version, position
     );
 
-CREATE TABLE IF NOT EXISTS ingestion.jobs (
+CREATE TABLE IF NOT EXISTS sf.jobs (
     job_id UUID PRIMARY KEY,
     tenant_id TEXT NOT NULL,
     domain TEXT NOT NULL,
@@ -58,7 +56,7 @@ CREATE TABLE IF NOT EXISTS ingestion.jobs (
     completed_at TIMESTAMPTZ,
     CONSTRAINT fk_ingestion_jobs_source_version
         FOREIGN KEY (tenant_id, domain, source_id, source_version)
-        REFERENCES ingestion.source_versions (
+        REFERENCES sf.source_versions (
             tenant_id, domain, source_id, source_version
         )
         ON DELETE RESTRICT,
@@ -70,20 +68,20 @@ CREATE TABLE IF NOT EXISTS ingestion.jobs (
 );
 
 CREATE INDEX IF NOT EXISTS ix_ingestion_jobs_pending
-    ON ingestion.jobs (status, updated_at)
+    ON sf.jobs (status, updated_at)
     WHERE status IN ('staged', 'failed');
 
-CREATE TABLE IF NOT EXISTS ingestion.sources (
+CREATE TABLE IF NOT EXISTS sf.sources (
     tenant_id TEXT NOT NULL,
     domain TEXT NOT NULL,
     source_id TEXT NOT NULL,
     current_version TEXT NOT NULL,
-    current_job_id UUID NOT NULL REFERENCES ingestion.jobs(job_id),
+    current_job_id UUID NOT NULL REFERENCES sf.jobs(job_id),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (tenant_id, domain, source_id),
     CONSTRAINT fk_ingestion_sources_current_version
         FOREIGN KEY (tenant_id, domain, source_id, current_version)
-        REFERENCES ingestion.source_versions (
+        REFERENCES sf.source_versions (
             tenant_id, domain, source_id, source_version
         )
         ON DELETE RESTRICT

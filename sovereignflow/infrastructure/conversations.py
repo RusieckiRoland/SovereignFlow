@@ -29,7 +29,7 @@ class PostgreSQLConversationHistory:
     def create_conversation(self, conversation: Conversation) -> Conversation:
         row = self._fetchone(
             """
-            INSERT INTO conversation.conversations (
+            INSERT INTO sf.conversations (
                 conversation_id, tenant_id, subject_hash, session_id, domain,
                 title, status, created_at, updated_at, deleted_at
             )
@@ -64,7 +64,7 @@ class PostgreSQLConversationHistory:
             """
             SELECT conversation_id, tenant_id, subject_hash, session_id, domain,
                    title, status, created_at, updated_at, deleted_at
-            FROM conversation.conversations
+            FROM sf.conversations
             WHERE tenant_id = %s AND subject_hash = %s AND status = 'active'
             ORDER BY updated_at DESC, created_at DESC
             LIMIT %s
@@ -85,7 +85,7 @@ class PostgreSQLConversationHistory:
             """
             SELECT conversation_id, tenant_id, subject_hash, session_id, domain,
                    title, status, created_at, updated_at, deleted_at
-            FROM conversation.conversations
+            FROM sf.conversations
             WHERE conversation_id = %s
               AND tenant_id = %s
               AND subject_hash = %s
@@ -106,7 +106,7 @@ class PostgreSQLConversationHistory:
     ) -> Conversation | None:
         row = self._fetchone_or_none(
             """
-            UPDATE conversation.conversations
+            UPDATE sf.conversations
             SET title = %s, updated_at = NOW()
             WHERE conversation_id = %s
               AND tenant_id = %s
@@ -130,7 +130,7 @@ class PostgreSQLConversationHistory:
     ) -> bool:
         row = self._fetchone_or_none(
             """
-            UPDATE conversation.conversations
+            UPDATE sf.conversations
             SET status = 'deleted', deleted_at = NOW(), updated_at = NOW()
             WHERE conversation_id = %s
               AND tenant_id = %s
@@ -157,7 +157,7 @@ class PostgreSQLConversationHistory:
                 cursor.execute(
                     """
                     SELECT COALESCE(MAX(sequence_number), 0) + 1
-                    FROM conversation.conversation_turns
+                    FROM sf.conversation_turns
                     WHERE conversation_id = %s
                     """,
                     (turn.conversation_id,),
@@ -165,7 +165,7 @@ class PostgreSQLConversationHistory:
                 next_sequence = int(cursor.fetchone()[0])
                 cursor.execute(
                     """
-                    INSERT INTO conversation.conversation_turns (
+                    INSERT INTO sf.conversation_turns (
                         turn_id, conversation_id, request_id, sequence_number,
                         question_text, answer_text, status, error_code,
                         created_at, finalized_at, metadata
@@ -204,9 +204,9 @@ class PostgreSQLConversationHistory:
     ) -> ConversationTurn | None:
         row = self._fetchone_or_none(
             """
-            UPDATE conversation.conversation_turns turn
+            UPDATE sf.conversation_turns turn
             SET status = 'finalized', answer_text = %s, finalized_at = NOW(), metadata = %s::jsonb
-            FROM conversation.conversations conversation
+            FROM sf.conversations conversation
             WHERE turn.conversation_id = conversation.conversation_id
               AND turn.conversation_id = %s
               AND turn.turn_id = %s
@@ -236,9 +236,9 @@ class PostgreSQLConversationHistory:
     ) -> ConversationTurn | None:
         row = self._fetchone_or_none(
             """
-            UPDATE conversation.conversation_turns turn
+            UPDATE sf.conversation_turns turn
             SET status = 'failed', error_code = %s, finalized_at = NOW(), metadata = %s::jsonb
-            FROM conversation.conversations conversation
+            FROM sf.conversations conversation
             WHERE turn.conversation_id = conversation.conversation_id
               AND turn.conversation_id = %s
               AND turn.turn_id = %s
@@ -316,8 +316,8 @@ class PostgreSQLConversationHistory:
                 SELECT turn.turn_id, turn.conversation_id, turn.request_id, turn.sequence_number,
                        turn.question_text, turn.answer_text, turn.status, turn.error_code,
                        turn.created_at, turn.finalized_at, turn.metadata
-                FROM conversation.conversation_turns turn
-                JOIN conversation.conversations conversation
+                FROM sf.conversation_turns turn
+                JOIN sf.conversations conversation
                   ON conversation.conversation_id = turn.conversation_id
                 WHERE turn.conversation_id = %s
                   AND conversation.tenant_id = %s

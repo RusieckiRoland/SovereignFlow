@@ -1,6 +1,4 @@
-CREATE SCHEMA IF NOT EXISTS conversation;
-
-CREATE TABLE IF NOT EXISTS conversation.conversations (
+CREATE TABLE IF NOT EXISTS sf.conversations (
     conversation_id UUID PRIMARY KEY,
     tenant_id TEXT NOT NULL,
     subject_hash CHAR(64) NOT NULL,
@@ -20,14 +18,14 @@ CREATE TABLE IF NOT EXISTS conversation.conversations (
 );
 
 CREATE INDEX IF NOT EXISTS conversations_subject_updated_idx
-    ON conversation.conversations (tenant_id, subject_hash, updated_at DESC);
+    ON sf.conversations (tenant_id, subject_hash, updated_at DESC);
 
 CREATE INDEX IF NOT EXISTS conversations_subject_session_idx
-    ON conversation.conversations (tenant_id, subject_hash, session_id);
+    ON sf.conversations (tenant_id, subject_hash, session_id);
 
-CREATE TABLE IF NOT EXISTS conversation.conversation_turns (
+CREATE TABLE IF NOT EXISTS sf.conversation_turns (
     turn_id UUID PRIMARY KEY,
-    conversation_id UUID NOT NULL REFERENCES conversation.conversations(conversation_id),
+    conversation_id UUID NOT NULL REFERENCES sf.conversations(conversation_id),
     request_id TEXT NOT NULL,
     sequence_number INTEGER NOT NULL,
     question_text TEXT NOT NULL,
@@ -52,7 +50,7 @@ CREATE TABLE IF NOT EXISTS conversation.conversation_turns (
 );
 
 CREATE INDEX IF NOT EXISTS conversation_turns_conversation_sequence_idx
-    ON conversation.conversation_turns (conversation_id, sequence_number);
+    ON sf.conversation_turns (conversation_id, sequence_number);
 
 CREATE INDEX IF NOT EXISTS conversation_turns_conversation_status_idx
-    ON conversation.conversation_turns (conversation_id, status, sequence_number DESC);
+    ON sf.conversation_turns (conversation_id, status, sequence_number DESC);

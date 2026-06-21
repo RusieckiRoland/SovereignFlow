@@ -3,9 +3,9 @@
 ## Target Environment
 
 - VPS: OVH VPS-2 2026, Ubuntu 26.04, 6 vCores, 12 GB RAM, 100 GB disk
-- IP: `57.128.245.201`
-- Application: `https://app.taricai.com`
-- Keycloak: `https://auth.taricai.com`
+- IP: `<vps-ip>`
+- Application: `https://<app-domain>`
+- Keycloak: `https://<auth-domain>`
 
 ## Architecture
 
@@ -14,8 +14,8 @@ Internet (443/80)
        │
     nginx                ← SSL termination, reverse proxy
        │
-       ├── app.taricai.com   → SovereignFlow :8000  (systemd)
-       └── auth.taricai.com  → Keycloak :28090      (Docker)
+       ├── <app-domain>   → SovereignFlow :8000  (systemd)
+       └── <auth-domain>  → Keycloak :28090      (Docker)
 
 localhost only:
   ├── Postgres  :5432    (Docker)
@@ -32,8 +32,8 @@ Public ports: **22, 80, 443 only**.
 
 ## Prerequisites
 
-- [x] DNS: `app.taricai.com` A `57.128.245.201`
-- [x] DNS: `auth.taricai.com` A `57.128.245.201`
+- [ ] DNS: `<app-domain>` A `<vps-ip>`
+- [ ] DNS: `<auth-domain>` A `<vps-ip>`
 - [ ] OpenAI API key
 - [ ] SSH access to VPS as `ubuntu`
 
@@ -140,6 +140,7 @@ Save the output — you will need all three values in the next command.
 sudo mkdir /etc/sovereignflow
 sudo tee /etc/sovereignflow/.env <<EOF
 SF_POSTGRES_URL=postgresql://sovereignflow:STRONG_PASSWORD@127.0.0.1:5432/sovereignflow
+SF_KC_HOSTNAME=https://<auth-domain>
 SF_POSTGRES_PASSWORD=STRONG_PASSWORD
 SF_WEAVIATE_API_KEY=RANDOM_KEY_32_CHARS
 SF_ADMIN_API_KEY=RANDOM_KEY_32_CHARS
@@ -188,9 +189,9 @@ admin:
   api_key_env: SF_ADMIN_API_KEY
 
 identity_provider:
-  issuer: https://auth.taricai.com/realms/sovereignflow
+  issuer: https://<auth-domain>/realms/sovereignflow
   audience: sovereignflow-api
-  jwks_url: https://auth.taricai.com/realms/sovereignflow/protocol/openid-connect/certs
+  jwks_url: https://<auth-domain>/realms/sovereignflow/protocol/openid-connect/certs
   algorithms: [RS256]
   timeout_seconds: 10
   cache_ttl_seconds: 300
@@ -205,9 +206,9 @@ identity_provider:
 
 web_client:
   client_id: sovereignflow-web-client
-  authorization_url: https://auth.taricai.com/realms/sovereignflow/protocol/openid-connect/auth
-  token_url: https://auth.taricai.com/realms/sovereignflow/protocol/openid-connect/token
-  logout_url: https://auth.taricai.com/realms/sovereignflow/protocol/openid-connect/logout
+  authorization_url: https://<auth-domain>/realms/sovereignflow/protocol/openid-connect/auth
+  token_url: https://<auth-domain>/realms/sovereignflow/protocol/openid-connect/token
+  logout_url: https://<auth-domain>/realms/sovereignflow/protocol/openid-connect/logout
 
 model_servers:
   - id: default-model
@@ -290,7 +291,38 @@ sudo journalctl -u sovereignflow -n 50
 
 ---
 
-## Step 9 — nginx + SSL
+## Step 9 — Setup
+
+Idempotent setup — safe to re-run on every deploy. Configures backups, health-check timer, and shared directories.
+
+```bash
+cd /opt/sovereignflow
+bash scripts/sf/setup.sh
+bash scripts/domain/setup.sh
+```
+
+Verify:
+```bash
+sudo systemctl list-timers sovereignflow-healthcheck.timer
+ls /var/backups/sovereignflow/
+```
+
+---
+
+## Step 10 — Apply changes
+
+Runs one-time change scripts exactly once. SF changes affect the infrastructure layer; domain changes affect the business layer. Each script is tracked by a `.done` marker in `/var/lib/sovereignflow/applied-changes/`.
+
+```bash
+cd /opt/sovereignflow
+bash scripts/sf/apply-changes.sh
+bash scripts/domain/apply-changes.sh
+```
+
+---
+
+## Step 11 — nginx + SSL
+
 
 First, create a temporary HTTP-only config so nginx starts and certbot can perform domain validation:
 
@@ -298,7 +330,7 @@ First, create a temporary HTTP-only config so nginx starts and certbot can perfo
 sudo tee /etc/nginx/sites-available/sovereignflow <<'EOF'
 server {
     listen 80;
-    server_name app.taricai.com auth.taricai.com;
+    server_name <app-domain> <auth-domain>;
 }
 EOF
 
@@ -310,8 +342,8 @@ Obtain SSL certificates:
 
 ```bash
 sudo certbot certonly --nginx \
-  -d app.taricai.com \
-  -d auth.taricai.com \
+  -d <app-domain> \
+  -d <auth-domain> \
   --non-interactive --agree-tos --email YOUR_EMAIL
 ```
 
@@ -321,16 +353,16 @@ Replace config with the full SSL + proxy config:
 sudo tee /etc/nginx/sites-available/sovereignflow <<'EOF'
 server {
     listen 80;
-    server_name app.taricai.com auth.taricai.com;
+    server_name <app-domain> <auth-domain>;
     return 301 https://$host$request_uri;
 }
 
 server {
     listen 443 ssl;
-    server_name app.taricai.com;
+    server_name <app-domain>;
 
-    ssl_certificate /etc/letsencrypt/live/app.taricai.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/app.taricai.com/privkey.pem;
+    ssl_certificate /etc/letsencrypt/live/<app-domain>/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/<app-domain>/privkey.pem;
 
     location / {
         proxy_pass http://127.0.0.1:8000;
@@ -344,10 +376,10 @@ server {
 
 server {
     listen 443 ssl;
-    server_name auth.taricai.com;
+    server_name <auth-domain>;
 
-    ssl_certificate /etc/letsencrypt/live/auth.taricai.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/auth.taricai.com/privkey.pem;
+    ssl_certificate /etc/letsencrypt/live/<auth-domain>/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/<auth-domain>/privkey.pem;
 
     location / {
         proxy_pass http://127.0.0.1:28090;
@@ -366,15 +398,15 @@ sudo nginx -t && sudo systemctl reload nginx
 
 ---
 
-## Step 10 — Verification
+## Step 12 — Verification
 
 ```bash
-curl https://app.taricai.com/ready
+curl https://<app-domain>/ready
 systemctl status sovereignflow
 journalctl -u sovereignflow -f
 ```
 
-Application available at: **https://app.taricai.com/app/**
+Application available at: **https://<app-domain>/app/**
 
 ---
 
@@ -392,7 +424,7 @@ docker compose --env-file /etc/sovereignflow/.env --profile identity up -d keycl
 
 Keycloak must know it is behind a TLS-terminating proxy. The `docker-compose.yml` sets:
 - `KC_PROXY_HEADERS: xforwarded` — trust `X-Forwarded-Proto` from nginx
-- `KC_HOSTNAME: https://auth.taricai.com` — force HTTPS in all generated URLs
+- `KC_HOSTNAME: https://<auth-domain>` — force HTTPS in all generated URLs
 
 If these are missing or not applied (e.g. after a `restart` instead of `up -d`), Keycloak will generate `http://` action URLs and the browser will warn about an insecure form.
 
