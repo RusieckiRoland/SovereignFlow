@@ -3,9 +3,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
-from sovereignflow.domain import ConversationTurn, PipelineExecutionError
-
 from sovereignflow.application.ports import ConversationHistoryPort
+from sovereignflow.domain import ConversationTurn, PipelineExecutionError
 
 if TYPE_CHECKING:
     from sovereignflow.application.pipeline import PipelineContext

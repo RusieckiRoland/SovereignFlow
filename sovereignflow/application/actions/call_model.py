@@ -6,7 +6,11 @@ from dataclasses import dataclass
 from hashlib import sha256
 from typing import TYPE_CHECKING, Any
 
-from sovereignflow.domain import PipelineDefinitionError, PipelineExecutionError, PolicyViolationError
+from sovereignflow.domain import (
+    PipelineDefinitionError,
+    PipelineExecutionError,
+    PolicyViolationError,
+)
 
 from ._config import (
     _optional_boolean,

@@ -127,11 +127,11 @@ class ActionRegistry:
 
 def default_action_registry() -> ActionRegistry:
     from .actions.call_model import CallModelAction
+    from .actions.enforce_model_transmission_policy import EnforceModelTransmissionPolicyAction
     from .actions.expand_graph import ExpandGraphAction
     from .actions.fail_conversation_turn import FailConversationTurnAction
     from .actions.finalize import FinalizeAction
     from .actions.finalize_conversation_turn import FinalizeConversationTurnAction
-    from .actions.enforce_model_transmission_policy import EnforceModelTransmissionPolicyAction
     from .actions.json_decision_router import JsonDecisionRouterAction
     from .actions.load_conversation_history import LoadConversationHistoryAction
     from .actions.loop_guard import LoopGuardAction
