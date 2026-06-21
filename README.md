@@ -1,5 +1,7 @@
 # SovereignFlow
 
+![CI](https://github.com/RusieckiRoland/SovereignFlow/actions/workflows/ci.yml/badge.svg)
+
 SovereignFlow is a domain-neutral foundation for Retrieval-Augmented Generation systems.
 
 It is extracted from the architectural lessons of LocalAI-RAG, but it is not a code-analysis fork. The new core does not know about repositories, branches, source-code languages, Roslyn, SQL objects, UML, or code snapshots.
